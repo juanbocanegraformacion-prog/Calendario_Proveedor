@@ -72,7 +72,7 @@ def main():
             st.info(f"Buscando monitoreo para: {', '.join(provs_hoy)}")
             
             # 3. Descargar el consolidado de GitHub para validar
-            url_github = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/Reporte_Alertas_CONSOLIDADO.xlsx"
+            url_github = "https://github.com/juanbocanegraformacion-prog/Calendario_Proveedor/blob/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
             
             try:
                 response = requests.get(url_github)
