@@ -20,7 +20,7 @@ if 'calendario' not in st.session_state:
 
 def main():
     st.title("📅 Gestión de Calendario de Proveedores")
-    st.markdown("### Configuración de Monitoreo Semanal - Abril 2026")
+    st.markdown("### Configuración de Monitoreo Semanal")
 
     col1, col2 = st.columns([2, 1])
 
