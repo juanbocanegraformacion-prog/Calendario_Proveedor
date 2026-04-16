@@ -66,43 +66,49 @@ def main():
             url_github = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
             
             try:
-                response = requests.get(url_github)
-                if response.status_code == 200:
-                    # 2. Leer Excel con motor openpyxl
-                    excel_data = io.BytesIO(response.content)
-                    df = pd.read_excel(excel_data, engine='openpyxl')
-                    
-                    # Limpiar nombres de columnas por si tienen espacios
-                    df.columns = df.columns.str.strip()
-                    
-                    st.markdown("### 📊 Órdenes Encontradas")
+            response = requests.get(url_github)
+            if response.status_code == 200:
+                excel_data = io.BytesIO(response.content)
+                df = pd.read_excel(excel_data, engine='openpyxl')
+                df.columns = df.columns.str.strip()
+                
+                st.markdown("### 📊 Resultado de la Búsqueda")
 
-                    for prov in provs_hoy:
-                        prov_buscado = prov.strip().upper()
+                for prov in provs_hoy:
+                    # Normalizamos el nombre del proveedor para la búsqueda
+                    # Usamos escape para que los puntos y paréntesis no rompan el regex
+                    prov_limpio = re.escape(prov.strip().upper())
+                    
+                    # Buscamos coincidencias parciales (ej. que "DIVAR" encuentre "DIVAR C.A.")
+                    mask = df['Proveedor'].astype(str).str.upper().str.contains(prov_limpio, na=False, regex=True)
+                    resultado = df[mask]
+                    
+                    if not resultado.empty:
+                        campos_web = [
+                            'Número de orden', 
+                            'Proveedor', 
+                            'Estatus', 
+                            'Tipo de entrega', 
+                            'Tipo de distribución', 
+                            'Creado por'
+                        ]
                         
-                        # 3. Filtrar por proveedor (Columna 'Proveedor')
-                        mask = df['Proveedor'].astype(str).str.upper().str.contains(prov_buscado, na=False)
-                        resultado = df[mask]
+                        df_final = resultado[campos_web].rename(columns={'Creado por': 'Comprador'})
                         
-                        if not resultado.empty:
-                            # 4. Seleccionar solo los campos solicitados
-                            # 'Creado por' se usa como 'Comprador' según el archivo adjunto
-                            campos_web = [
-                                'Número de orden', 
-                                'Proveedor', 
-                                'Estatus', 
-                                'Tipo de entrega', 
-                                'Tipo de distribución', 
-                                'Creado por'
-                            ]
-                            
-                            # Mostrar solo los registros encontrados para ese proveedor
-                            df_final = resultado[campos_web].rename(columns={'Creado por': 'Comprador'})
-                            
-                            with st.expander(f"✅ {prov} - {len(df_final)} orden(es) encontrada(s)"):
-                                st.table(df_final)
+                        with st.expander(f"✅ {prov} - {len(df_final)} orden(es) encontrada(s)"):
+                            st.table(df_final)
+                    else:
+                        # Si falla el nombre completo, intentamos buscar solo la primera palabra (ej: "DIVAR")
+                        primera_palabra = re.escape(prov.split()[0].upper())
+                        mask_fuzzy = df['Proveedor'].astype(str).str.upper().str.contains(primera_palabra, na=False, regex=True)
+                        resultado_fuzzy = df[mask_fuzzy]
+                        
+                        if not resultado_fuzzy.empty:
+                            df_final_f = resultado_fuzzy[campos_web].rename(columns={'Creado por': 'Comprador'})
+                            with st.expander(f"⚠️ {prov} (Encontrado como coincidencia parcial)"):
+                                st.table(df_final_f)
                         else:
-                            st.warning(f"⏳ **{prov}**: Orden en proceso / No encontrada en el reporte")
+                            st.warning(f"⏳ **{prov}**: Orden en proceso / No encontrada")
                 else:
                     st.error(f"Error al descargar reporte de GitHub (Status {response.status_code})")
             
