@@ -72,8 +72,36 @@ def main():
             st.error("No hay proveedores programados para hoy.")
 
     if col_btn2.button("📊 Ver Reporte Consolidado"):
-        st.info("Abriendo Reporte_Alertas_CONSOLIDADO.xlsx...")
-        # Lógica para abrir o mostrar el Excel que genera tu script
+        # URL Raw del archivo en GitHub
+        url_github = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/Reporte_Alertas_CONSOLIDADO.xlsx"
+        
+        try:
+            # 1. Descargamos el archivo de GitHub
+            response = requests.get(url_github)
+            
+            if response.status_code == 200:
+                # 2. Cargamos el contenido en Pandas usando un buffer de memoria
+                excel_data = io.BytesIO(response.content)
+                df_reporte = pd.read_excel(excel_data)
+                
+                st.success("✅ Reporte cargado desde GitHub con éxito.")
+                
+                # 3. Mostramos los datos directamente en la Web
+                st.subheader("Vista Previa del Reporte")
+                st.dataframe(df_reporte, use_container_width=True)
+                
+                # 4. Botón opcional para descargar localmente
+                st.download_button(
+                    label="📥 Descargar este Excel",
+                    data=response.content,
+                    file_name="Reporte_Alertas_CONSOLIDADO.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            else:
+                st.error(f"❌ No se pudo acceder al archivo. Status: {response.status_code}")
+                
+        except Exception as e:
+            st.error(f"⚠️ Ocurrió un error al conectar con GitHub: {e}")
 
 if __name__ == "__main__":
     main()
