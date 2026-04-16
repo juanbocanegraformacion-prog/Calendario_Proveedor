@@ -4,14 +4,7 @@ import datetime
 import requests
 import io  # <--- Agrega esta línea para manejar los datos en memoria
 from datetime import datetime
-import subprocess
-import sys
 
-# Esto instala la librería automáticamente si no existe
-try:
-    import openpyxl
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
 # Configuración de página
 st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 
