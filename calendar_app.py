@@ -21,6 +21,33 @@ if 'calendario' not in st.session_state:
     }
 
 def main():
+    st.title("📅 Gestión de Calendario de Proveedores")
+    st.markdown("### Configuración de Monitoreo Semanal")
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.subheader("Vista de Planificación")
+        # Convertimos el diccionario a un DataFrame para visualizarlo como tabla
+        df_cal = pd.DataFrame.from_dict(st.session_state.calendario, orient='index').transpose()
+        st.dataframe(df_cal.fillna("-"), use_container_width=True)
+
+        # Simulación del calendario de Abril (Días específicos)
+        st.info("💡 El bot verificará los proveedores según el día actual del servidor.")
+
+    with col2:
+        st.subheader("⚙️ Panel de Control")
+        dia_editar = st.selectbox("Seleccionar día para editar:", list(st.session_state.calendario.keys()))
+        
+        # Gestionar proveedores por día
+        proveedores_actuales = ", ".join(st.session_state.calendario[dia_editar])
+        nuevos_provs = st.text_area(f"Proveedores para {dia_editar}:", value=proveedores_actuales)
+        
+        if st.button("Guardar Cambios"):
+            st.session_state.calendario[dia_editar] = [p.strip() for p in nuevos_provs.split(",") if p.strip()]
+            st.success(f"Calendario de {dia_editar} actualizado.")
+            st.rerun()
+
     st.divider()
     st.subheader("🤖 Ejecución de RPA")
     sucursal_target = st.selectbox("Sucursal a monitorear:", ["CENDI GUATIRE", "CENDI 4 DE MAYO"])
