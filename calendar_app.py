@@ -7,7 +7,7 @@ from datetime import datetime
 # Configuración de página
 st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 
-# --- DATA INICIAL ---
+# --- DATA INICIAL (Calendario) ---
 if 'calendario' not in st.session_state:
     st.session_state.calendario = {
         "Lunes": ["Polar", "Dimassi", "Ponce"],
@@ -29,7 +29,6 @@ def main():
         st.subheader("Vista de Planificación")
         df_cal = pd.DataFrame.from_dict(st.session_state.calendario, orient='index').transpose()
         st.dataframe(df_cal.fillna("-"), use_container_width=True)
-        st.info("💡 El bot verificará los proveedores según el día actual del servidor.")
 
     with col2:
         st.subheader("⚙️ Panel de Control")
@@ -49,6 +48,7 @@ def main():
     col_btn1, col_btn2 = st.columns(2)
     
     if col_btn1.button("🚀 Iniciar Monitoreo de Hoy", type="primary"):
+        # 1. Identificar día actual
         dia_hoy = datetime.now().strftime('%A')
         mapping = {
             "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles", 
@@ -60,49 +60,63 @@ def main():
         if not provs_hoy:
             st.error(f"No hay proveedores programados para hoy ({dia_es}).")
         else:
-            st.info(f"Buscando monitoreo para: {', '.join(provs_hoy)}")
+            st.info(f"Buscando órdenes para: {', '.join(provs_hoy)}")
             
-            # URL RAW DE GITHUB (Corregida para descarga directa)
+            # URL RAW DE GITHUB
             url_github = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
             
             try:
                 response = requests.get(url_github)
                 if response.status_code == 200:
+                    # 2. Leer Excel con motor openpyxl
                     excel_data = io.BytesIO(response.content)
-                    # Especificamos engine='openpyxl' para evitar el error de formato
                     df = pd.read_excel(excel_data, engine='openpyxl')
                     
-                    # Normalización de la columna C (Proveedor)
-                    # Columna C es índice 2, Columna A es índice 0, etc.
-                    df.columns = df.columns.str.strip() 
+                    # Limpiar nombres de columnas por si tienen espacios
+                    df.columns = df.columns.str.strip()
                     
-                    st.markdown("### 📊 Resultado de la Búsqueda")
-                    
+                    st.markdown("### 📊 Órdenes Encontradas")
+
                     for prov in provs_hoy:
                         prov_buscado = prov.strip().upper()
-                        # Filtrar filas donde el proveedor coincida (Columna 'Proveedor')
-                        filtro = df[df['Proveedor'].astype(str).str.upper().str.contains(prov_buscado, na=False)]
                         
-                        if not filtro.empty:
-                            for index, row in filtro.iterrows():
-                                with st.expander(f"✅ {prov} - Orden: {row['Número de orden']}"):
-                                    st.write(f"**Estatus:** {row['Estatus']}")
-                                    st.write(f"**Tipo de entrega:** {row['Tipo de entrega']}")
-                                    st.write(f"**Distribución:** {row['Tipo de distribución']}")
-                                    st.write(f"**Comprador:** {row['Creado por']}") # Ajustado según el archivo adjunto (Creado por)
+                        # 3. Filtrar por proveedor (Columna 'Proveedor')
+                        mask = df['Proveedor'].astype(str).str.upper().str.contains(prov_buscado, na=False)
+                        resultado = df[mask]
+                        
+                        if not resultado.empty:
+                            # 4. Seleccionar solo los campos solicitados
+                            # 'Creado por' se usa como 'Comprador' según el archivo adjunto
+                            campos_web = [
+                                'Número de orden', 
+                                'Proveedor', 
+                                'Estatus', 
+                                'Tipo de entrega', 
+                                'Tipo de distribución', 
+                                'Creado por'
+                            ]
+                            
+                            # Mostrar solo los registros encontrados para ese proveedor
+                            df_final = resultado[campos_web].rename(columns={'Creado por': 'Comprador'})
+                            
+                            with st.expander(f"✅ {prov} - {len(df_final)} orden(es) encontrada(s)"):
+                                st.table(df_final)
                         else:
-                            st.warning(f"⏳ **{prov}**: Orden en proceso / No encontrada")
+                            st.warning(f"⏳ **{prov}**: Orden en proceso / No encontrada en el reporte")
                 else:
-                    st.error(f"Error al descargar de GitHub. Status: {response.status_code}")
+                    st.error(f"Error al descargar reporte de GitHub (Status {response.status_code})")
+            
             except Exception as e:
-                st.error(f"Error técnico durante la validación: {e}")
+                st.error(f"Error técnico: {e}")
 
-    if col_btn2.button("📊 Ver Reporte Consolidado"):
+    if col_btn2.button("📊 Ver Reporte Completo"):
         url_github = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
-        response = requests.get(url_github)
-        if response.status_code == 200:
-            df_full = pd.read_excel(io.BytesIO(response.content), engine='openpyxl')
+        try:
+            res = requests.get(url_github)
+            df_full = pd.read_excel(io.BytesIO(res.content), engine='openpyxl')
             st.dataframe(df_full)
+        except Exception as e:
+            st.error(f"No se pudo cargar el reporte: {e}")
 
 if __name__ == "__main__":
     main()
