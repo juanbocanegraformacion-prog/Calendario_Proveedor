@@ -4,7 +4,7 @@ import datetime
 import requests
 import io  # <--- Agrega esta línea para manejar los datos en memoria
 from datetime import datetime
-
+import openpyxl
 # Configuración de página
 st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 
