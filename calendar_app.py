@@ -138,7 +138,7 @@ with st.sidebar:
                 st.rerun()
 
             # Lógica para eliminar
-            id_borrar = st.selectbox("Seleccione ID para eliminar:", df_m['id'])
+            id_borrar = st.selectbox("Seleccione comprador para eliminar:", df_m['comprador_habitual'])
             if st.button("🗑️ Eliminar Registro Seleccionado", type="primary"):
                 eliminar_comprador(id_borrar)
                 st.toast(f"Registro {id_borrar} eliminado")
