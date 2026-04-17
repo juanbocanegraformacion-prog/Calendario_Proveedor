@@ -68,24 +68,25 @@ def obtener_id_proveedor(nombre):
     return row[0] if row else None
 
 def guardar_calendario_semana(fecha_lunes, dia_semana, proveedores_lista):
-    """
-    Almacena en calendario_historico la configuración de un día de una semana.
-    Primero elimina las entradas existentes para ese día en esa semana.
-    """
+    if isinstance(fecha_lunes, datetime):
+        fecha_str = fecha_lunes.date().isoformat()
+    elif hasattr(fecha_lunes, 'isoformat'):
+        fecha_str = fecha_lunes.isoformat()
+    else:
+        fecha_str = str(fecha_lunes)
+    
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # Eliminar entradas previas para (fecha_lunes, dia_semana)
-    c.execute("DELETE FROM calendario_historico WHERE fecha_semana = ? AND dia_semana = ?", (fecha_lunes, dia_semana))
+    c.execute("DELETE FROM calendario_historico WHERE fecha_semana = ? AND dia_semana = ?", (fecha_str, dia_semana))
     for nombre_prov in proveedores_lista:
         nombre_prov = nombre_prov.strip()
         if not nombre_prov:
             continue
-        # Asegurar que el proveedor exista en maestro
         guardar_proveedor(nombre_prov)
         prov_id = obtener_id_proveedor(nombre_prov)
         if prov_id:
             c.execute("INSERT INTO calendario_historico (fecha_semana, dia_semana, proveedor_id) VALUES (?, ?, ?)",
-                      (fecha_lunes, dia_semana, prov_id))
+                      (fecha_str, dia_semana, prov_id))
     conn.commit()
     conn.close()
 
