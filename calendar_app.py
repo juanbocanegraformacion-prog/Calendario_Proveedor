@@ -48,9 +48,17 @@ def registrar_comprador(proveedor, comprador):
         conn.close()
         return False
 
+def eliminar_comprador(id_registro):
+    conn = sqlite3.connect('calendario.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM proveedores_maestro WHERE id = ?", (id_registro,))
+    conn.commit()
+    conn.close()
+
 def obtener_compradores_autorizados():
     conn = sqlite3.connect('calendario.db')
-    df = pd.read_sql_query("SELECT nombre, comprador_habitual FROM proveedores_maestro", conn)
+    # Traemos el ID para poder gestionar acciones
+    df = pd.read_sql_query("SELECT id, nombre, comprador_habitual FROM proveedores_maestro", conn)
     conn.close()
     return df
 
@@ -105,8 +113,38 @@ with st.sidebar:
             registrar_comprador(new_p, new_c)
         st.rerun()
 
-    if st.checkbox("Ver Compradores Registrados"):
-        st.table(obtener_compradores_autorizados())
+    st.divider()
+    # SECCIÓN: GESTIÓN DE COMPRADORES (ELIMINAR / MODIFICAR)
+    if st.checkbox("🔍 Gestionar Compradores"):
+        df_m = obtener_compradores_autorizados()
+        if not df_m.empty:
+            st.caption("Para modificar, use el editor. Para eliminar, use el botón rojo.")
+            # Usamos data_editor para permitir modificaciones directas
+            edited_m = st.data_editor(df_m, 
+                                     column_config={"id": None}, # Ocultar ID
+                                     hide_index=True, 
+                                     use_container_width=True,
+                                     key="editor_compradores")
+            
+            # Lógica para detectar cambios en el editor y actualizar DB
+            if st.button("🔄 Aplicar Cambios Realizados"):
+                conn = sqlite3.connect('calendario.db')
+                for index, row in edited_m.iterrows():
+                    conn.execute("UPDATE proveedores_maestro SET nombre = ?, comprador_habitual = ? WHERE id = ?", 
+                                 (row['nombre'].upper(), row['comprador_habitual'].upper(), row['id']))
+                conn.commit()
+                conn.close()
+                st.success("Registros actualizados")
+                st.rerun()
+
+            # Lógica para eliminar
+            id_borrar = st.selectbox("Seleccione ID para eliminar:", df_m['id'])
+            if st.button("🗑️ Eliminar Registro Seleccionado", type="primary"):
+                eliminar_comprador(id_borrar)
+                st.toast(f"Registro {id_borrar} eliminado")
+                st.rerun()
+        else:
+            st.info("No hay compradores registrados.")
 
 # --- 4. ÁREA PRINCIPAL ---
 st.title("📅 Monitor de Órdenes de Compra")
@@ -130,18 +168,15 @@ st.divider()
 # --- 5. LÓGICA DE MONITOREO AUTOMÁTICO ---
 st.subheader("🤖 Monitoreo en Tiempo Real")
 
-# Obtener día actual
 dia_hoy_idx = datetime.now().weekday()
 dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 dia_hoy_es = dias_semana[dia_hoy_idx]
 
-# Buscar proveedores para el día actual en la planificación cargada
 provs_hoy = cal_actual.get(dia_hoy_es, [])
 
 if not provs_hoy or provs_hoy == ["-"]:
     st.info(f"No hay proveedores programados para hoy ({dia_hoy_es}).")
 else:
-    # Caché de 5 minutos para la descarga de datos
     @st.cache_data(ttl=300)
     def obtener_datos_github(url):
         res = requests.get(url)
@@ -154,31 +189,24 @@ else:
         df_raw.columns = df_raw.columns.str.strip()
         df_raw = df_raw.rename(columns={'Creado por': 'Comprador'})
 
-        # Cargar registro de compradores autorizados
         df_aut = obtener_compradores_autorizados()
+        # Aseguramos que la validación use los datos frescos
         df_aut['key'] = df_aut['nombre'].str.upper().str.strip() + "|" + df_aut['comprador_habitual'].str.upper().str.strip()
         set_autorizados = set(df_aut['key'].tolist())
 
         def validar(row):
             p_ex = str(row['Proveedor']).upper().strip()
             c_ex = str(row['Comprador']).upper().strip()
-            # Validar si el proveedor está en la lista de hoy
-            if not any(p in p_ex for p in provs_hoy): 
-                return False
-            # Validar si la combinación proveedor-comprador existe en la base de datos
+            if not any(p in p_ex for p in provs_hoy): return False
             return f"{p_ex}|{c_ex}" in set_autorizados
 
         df_filtrado = df_raw[df_raw.apply(validar, axis=1)].copy()
 
         if not df_filtrado.empty:
             st.success(f"Órdenes validadas para hoy ({dia_hoy_es}):")
-            st.dataframe(
-                df_filtrado[['Número de orden', 'Proveedor', 'Estatus', 'Comprador']], 
-                use_container_width=True, 
-                hide_index=True
-            )
+            st.dataframe(df_filtrado[['Número de orden', 'Proveedor', 'Estatus', 'Comprador']], use_container_width=True, hide_index=True)
         else:
-            st.info(f"✅ No se encontraron órdenes que coincidan con los criterios para {dia_hoy_es}.")
+            st.info(f"✅ Sin órdenes pendientes para {dia_hoy_es} con los compradores autorizados.")
             
     except Exception as e:
         st.error(f"Error al sincronizar datos: {e}")
