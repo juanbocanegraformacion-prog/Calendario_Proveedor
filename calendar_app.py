@@ -12,20 +12,18 @@ st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 def init_db():
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
-    # Tabla Maestro de Proveedores
     cursor.execute('''CREATE TABLE IF NOT EXISTS proveedores_maestro 
                       (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, comprador_habitual TEXT)''')
-    # Tabla de Calendario Histórico
     cursor.execute('''CREATE TABLE IF NOT EXISTS calendario_historico 
-                      (id INTEGER PRIMARY KEY, fecha_semana DATE, dia_semana TEXT, proveedores TEXT)''')
-    
-    # Datos iniciales si la tabla está vacía
-    cursor.execute("SELECT COUNT(*) FROM proveedores_maestro")
-    if cursor.fetchone()[0] == 0:
-        provs = [("POLAR", "JESÚS PÉREZ"), ("OXFORD", "MAIKEL GARCÍA"), ("DIVAR", "MARVEL GARCÍA")]
-        cursor.executemany("INSERT INTO proveedores_maestro (nombre, comprador_habitual) VALUES (?,?)", provs)
+                      (id INTEGER PRIMARY KEY, fecha_semana TEXT, dia_semana TEXT, proveedores TEXT)''')
+    # Crear un índice único para evitar errores en INSERT OR REPLACE
+    cursor.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_fecha_dia 
+                      ON calendario_historico (fecha_semana, dia_semana)''')
     conn.commit()
-    return conn
+    conn.close()
+
+# Ejecutar inmediatamente después de definirla
+init_db()
 
 def guardar_calendario(fecha, calendario_dict):
     conn = sqlite3.connect('calendario.db')
@@ -39,12 +37,21 @@ def guardar_calendario(fecha, calendario_dict):
 
 def cargar_semana(fecha):
     conn = sqlite3.connect('calendario.db')
-    df = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", 
-                           conn, params=(fecha,))
-    conn.close()
-    if df.empty:
+    try:
+        # Convertimos la fecha a string para asegurar compatibilidad con SQLite
+        fecha_str = str(fecha) 
+        df = pd.read_sql_query(
+            "SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", 
+            conn, 
+            params=(fecha_str,)
+        )
+        conn.close()
+        if df.empty:
+            return None
+        return dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
+    except Exception as e:
+        conn.close()
         return None
-    return dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
 
 # --- 2. LÓGICA DE FECHAS Y NAVEGACIÓN ---
 if 'fecha_referencia' not in st.session_state:
