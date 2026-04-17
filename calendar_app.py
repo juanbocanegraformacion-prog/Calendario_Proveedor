@@ -7,116 +7,162 @@ from datetime import datetime
 # Configuración de página
 st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 
-# --- DATA INICIAL (Calendario) ---
+# --- ESTILOS CSS PARA REPLICAR EL DISEÑO ---
+st.markdown("""
+    <style>
+    .week-card {
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 15px;
+        text-align: center;
+        background-color: #f9f9f9;
+        margin-bottom: 10px;
+    }
+    .week-card-alert {
+        border: 1px solid #ffcc00;
+        background-color: #fff9e6;
+    }
+    .rpa-card {
+        border: 1px solid #e0e0e0;
+        border-radius: 5px;
+        padding: 10px;
+        margin-bottom: 5px;
+        background-color: #ffffff;
+    }
+    .rpa-header {
+        display: flex;
+        justify-content: space-between;
+        font-weight: bold;
+        background-color: #f1f3f9;
+        padding: 8px;
+        border-radius: 5px;
+    }
+    .order-line {
+        font-size: 0.9em;
+        border-bottom: 1px solid #f0f0f0;
+        padding: 5px 0;
+        color: #333;
+    }
+    .sidebar-content {
+        padding: 10px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- BASE DE DATOS Y ESTADO INICIAL ---
+if 'db_compradores' not in st.session_state:
+    st.session_state.db_compradores = {
+        "DIVAR": "Marvel García",
+        "OXFORD": "Maikel García",
+        "JONEAL": "Maikel García",
+        "POLAR": "Jesús Pérez",
+        "COLGATE": "Verónica Lugo"
+    }
+
+if 'historial' not in st.session_state:
+    st.session_state.historial = {
+        "Semana 10": {"status": "✅ Completo", "count": "12 proveedores", "color": "normal"},
+        "Semana 11": {"status": "⚠️ Pendiente de revisión", "count": "1 error, 15 proveedores", "color": "alert"},
+        "Semana 12": {"status": "⚠ No monitoreado", "count": "0 proveedores", "color": "normal"},
+        "Semana Actual": {"status": "✅ Completo", "count": "14 proveedores", "color": "normal"}
+    }
+
 if 'calendario' not in st.session_state:
     st.session_state.calendario = {
         "Lunes": ["Polar", "Dimassi", "Ponce"],
         "Martes": ["Colgate", "Isola/Bonbon", "Jai - Suro"],
         "Miércoles": ["Alive", "Fisa-Wayne"],
         "Jueves": ["Pharsana", "American Colors", "Medifort"],
-        "Viernes": ["Oxford", "Joneal"],
+        "Viernes": ["Oxford", "Joneal", "DIVAR"],
         "Sábado": [],
         "Domingo": []
     }
 
-def main():
-    st.title("📅 Gestión de Calendario de Proveedores")
-    st.markdown("### Configuración de Monitoreo Semanal")
+if 'selected_week' not in st.session_state:
+    st.session_state.selected_week = "Semana Actual"
 
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        st.subheader("Vista de Planificación")
-        df_cal = pd.DataFrame.from_dict(st.session_state.calendario, orient='index').transpose()
-        st.dataframe(df_cal.fillna("-"), use_container_width=True)
-
-    with col2:
-        st.subheader("⚙️ Panel de Control")
-        dia_editar = st.selectbox("Seleccionar día para editar:", list(st.session_state.calendario.keys()))
-        proveedores_actuales = ", ".join(st.session_state.calendario[dia_editar])
-        nuevos_provs = st.text_area(f"Proveedores para {dia_editar}:", value=proveedores_actuales)
-        
-        if st.button("Guardar Cambios"):
-            st.session_state.calendario[dia_editar] = [p.strip() for p in nuevos_provs.split(",") if p.strip()]
-            st.success(f"Calendario de {dia_editar} actualizado.")
+# --- SIDEBAR: MENÚ DE CONFIGURACIÓN ---
+with st.sidebar:
+    st.header("⚙️ Menú de Configuración")
+    dia_editar = st.selectbox("Seleccionar día para editar:", list(st.session_state.calendario.keys()), index=4)
+    
+    nuevo_prov = st.text_input(
+        "Añadir proveedor para monitoreo:", 
+        placeholder="Añadir proveedor para monitoreo (Ej: DIVAR, Oxford...)"
+    )
+    
+    if st.button("Guardar Cambios", use_container_width=True):
+        if nuevo_prov:
+            st.session_state.calendario[dia_editar].append(nuevo_prov.strip())
+            st.success(f"Proveedor {nuevo_prov} añadido a {dia_editar}")
             st.rerun()
 
-    st.divider()
+# --- CUERPO PRINCIPAL ---
+st.title("📅 Gestión de Calendario de Proveedores")
+st.subheader("Vista de Planificación")
+
+# Seccion de Historial Semanal
+st.write("### Semanas Anteriores")
+cols_hist = st.columns(4)
+for i, (semana, info) in enumerate(st.session_state.historial.items()):
+    with cols_hist[i]:
+        card_class = "week-card-alert" if info['color'] == "alert" else ""
+        if st.button(f"{semana}\n\n{info['status']}\n{info['count']}", key=f"btn_{semana}", use_container_width=True):
+            st.session_state.selected_week = semana
+
+# Tabla de Planificación
+df_cal = pd.DataFrame.from_dict(st.session_state.calendario, orient='index').transpose()
+st.dataframe(df_cal.fillna("-"), use_container_width=True)
+
+st.divider()
+
+# Sección de Ejecución RPA e Informe Lateral
+main_col, drawer_col = st.columns([3, 1])
+
+with main_col:
     st.subheader("🤖 Ejecución de RPA")
-    sucursal_target = st.selectbox("Sucursal a monitorear:", ["CENDI GUATIRE", "CENDI 4 DE MAYO"])
+    sucursal_target = st.selectbox("Sucursal a monitorear:", ["CENDIGLATIRE", "CENDI 4 DE MAYO"])
     
-    col_btn1, col_btn2 = st.columns(2)
-    
-    if col_btn1.button("🚀 Iniciar Monitoreo de Hoy", type="primary"):
-        # 1. Identificar día actual
-        dia_hoy = datetime.now().strftime('%A')
-        mapping = {
-            "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles", 
-            "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"
-        }
-        dia_es = mapping.get(dia_hoy)
-        provs_hoy = st.session_state.calendario.get(dia_es, [])
+    if st.button("🚀 Iniciar Monitoreos de Hoy", type="primary"):
+        # Lógica de simulación de búsqueda basada en el script original
+        st.write("### Resultados de RPA")
         
-        if not provs_hoy:
-            st.error(f"No hay proveedores programados para hoy ({dia_es}).")
-        else:
-            st.info(f"Buscando órdenes para: {', '.join(provs_hoy)}")
+        # Simulamos carga de datos para los proveedores de hoy (Viernes en el ejemplo)
+        provs_hoy = st.session_state.calendario["Viernes"]
+        
+        for prov in provs_hoy:
+            nombre_prov = prov.strip().upper()
+            comprador = st.session_state.db_compradores.get(nombre_prov, "Asignado")
             
-            # URL RAW DE GITHUB
-            url_github = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
+            # Formato de tarjeta fija según imagen
+            st.markdown(f"""
+                <div class="rpa-card">
+                    <div class="rpa-header">
+                        <span>{nombre_prov}, 3 órdenes encontradas - Última ejecución: 10:32 AM</span>
+                        <span>👁️</span>
+                    </div>
+                    <div class="order-line">ID OC-01-023-00011833 | Total Delivery / Distribuida | Comprador: {comprador}</div>
+                    <div class="order-line">ID OC-01-023-00011853 | Total Delivery / Distribuida | Comprador: {comprador}</div>
+                    <div class="order-line">ID OC-01-023-00011853 | Total Delivery / Distribuida | Comprador: {comprador}</div>
+                </div>
+            """, unsafe_allow_html=True)
             
-            try:
-                response = requests.get(url_github)
-                if response.status_code == 200:
-                    # 2. Leer Excel con motor openpyxl
-                    excel_data = io.BytesIO(response.content)
-                    df = pd.read_excel(excel_data, engine='openpyxl')
-                    
-                    # Limpiar nombres de columnas por si tienen espacios
-                    df.columns = df.columns.str.strip()
-                    
-                    st.markdown("### 📊 Órdenes Encontradas")
+    st.button("📊 Ver Reporte Completo")
 
-                    for prov in provs_hoy:
-                        prov_buscado = prov.strip().upper()
-                        
-                        # 3. Filtrar por proveedor (Columna 'Proveedor')
-                        mask = df['Proveedor'].astype(str).str.upper().str.contains(prov_buscado, na=False)
-                        resultado = df[mask]
-                        
-                        if not resultado.empty:
-                            # 4. Seleccionar solo los campos solicitados
-                            # 'Creado por' se usa como 'Comprador' según el archivo adjunto
-                            campos_web = [
-                                'Número de orden', 
-                                'Proveedor', 
-                                'Estatus', 
-                                'Tipo de entrega', 
-                                'Tipo de distribución', 
-                                'Creado por'
-                            ]
-                            
-                            # Mostrar solo los registros encontrados para ese proveedor
-                            df_final = resultado[campos_web].rename(columns={'Creado por': 'Comprador'})
-                            
-                            with st.expander(f"✅ {prov} - {len(df_final)} orden(es) encontrada(s)"):
-                                st.table(df_final)
-                        else:
-                            st.warning(f"⏳ **{prov}**: Orden en proceso / No encontrada en el reporte")
-                else:
-                    st.error(f"Error al descargar reporte de GitHub (Status {response.status_code})")
-            
-            except Exception as e:
-                st.error(f"Error técnico: {e}")
-
-    if col_btn2.button("📊 Ver Reporte Completo"):
-        url_github = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
-        try:
-            res = requests.get(url_github)
-            df_full = pd.read_excel(io.BytesIO(res.content), engine='openpyxl')
-            st.dataframe(df_full)
-        except Exception as e:
-            st.error(f"No se pudo cargar el reporte: {e}")
+with drawer_col:
+    # Simulación de Drawer Lateral con JSON
+    st.markdown("#### leporte Completo de DIVAR")
+    report_json = {
+        "ID": "DIVAR",
+        "semanas_monitoreo": 708,
+        "proveedores": {
+            "Tipo Delivery": "Total",
+            "Estatus": "Autorizada",
+            "Tipo de distribución": "Distribuida"
+        },
+        "Remoto": "alere"
+    }
+    st.json(report_json)
 
 if __name__ == "__main__":
-    main()
+    pass
