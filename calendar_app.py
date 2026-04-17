@@ -12,7 +12,7 @@ st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 def init_db():
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
-    # Cambiamos la tabla para que NO tenga UNIQUE en nombre, permitiendo varios compradores por proveedor
+    # 1. Quitamos 'UNIQUE' de la columna nombre para permitir varios compradores
     cursor.execute('''CREATE TABLE IF NOT EXISTS proveedores_maestro 
                       (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                        nombre TEXT, 
@@ -30,16 +30,23 @@ def init_db():
 init_db()
 
 def registrar_comprador(proveedor, comprador):
-    """Permite registrar múltiples compradores para un mismo proveedor"""
+    """Permite registrar múltiples compradores para un mismo proveedor sin errores de integridad"""
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     p_up, c_up = proveedor.strip().upper(), comprador.strip().upper()
     
-    # Verificamos si ya existe esa combinación exacta para no duplicar
-    cursor.execute("SELECT * FROM proveedores_maestro WHERE nombre = ? AND comprador_habitual = ?", (p_up, c_up))
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO proveedores_maestro (nombre, comprador_habitual) VALUES (?, ?)", (p_up, c_up))
-        conn.commit()
+    # Verificamos si ya existe EXACTAMENTE esa combinación para no duplicarla innecesariamente
+    cursor.execute("SELECT 1 FROM proveedores_maestro WHERE nombre = ? AND comprador_habitual = ?", (p_up, c_up))
+    exists = cursor.fetchone()
+    
+    if not exists:
+        try:
+            cursor.execute("INSERT INTO proveedores_maestro (nombre, comprador_habitual) VALUES (?, ?)", (p_up, c_up))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            # En caso de que la tabla vieja siga ahí, este bloque evita que la app se caiga
+            st.error("Error de integridad: La base de datos aún tiene restricciones antiguas.")
+    
     conn.close()
 
 def obtener_compradores_autorizados():
