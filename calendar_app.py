@@ -2,167 +2,149 @@ import streamlit as st
 import pandas as pd
 import requests
 import io
-from datetime import datetime
+import sqlite3
+from datetime import datetime, timedelta
 
-# Configuración de página
+# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 
-# --- ESTILOS CSS PARA REPLICAR EL DISEÑO ---
-st.markdown("""
-    <style>
-    .week-card {
-        border: 1px solid #ddd;
-        border-radius: 10px;
-        padding: 15px;
-        text-align: center;
-        background-color: #f9f9f9;
-        margin-bottom: 10px;
-    }
-    .week-card-alert {
-        border: 1px solid #ffcc00;
-        background-color: #fff9e6;
-    }
-    .rpa-card {
-        border: 1px solid #e0e0e0;
-        border-radius: 5px;
-        padding: 10px;
-        margin-bottom: 5px;
-        background-color: #ffffff;
-    }
-    .rpa-header {
-        display: flex;
-        justify-content: space-between;
-        font-weight: bold;
-        background-color: #f1f3f9;
-        padding: 8px;
-        border-radius: 5px;
-    }
-    .order-line {
-        font-size: 0.9em;
-        border-bottom: 1px solid #f0f0f0;
-        padding: 5px 0;
-        color: #333;
-    }
-    .sidebar-content {
-        padding: 10px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# --- 1. PERSISTENCIA Y BASE DE DATOS (SQLite) ---
+def init_db():
+    conn = sqlite3.connect('calendario.db')
+    cursor = conn.cursor()
+    # Tabla Maestro de Proveedores
+    cursor.execute('''CREATE TABLE IF NOT EXISTS proveedores_maestro 
+                      (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, comprador_habitual TEXT)''')
+    # Tabla de Calendario Histórico
+    cursor.execute('''CREATE TABLE IF NOT EXISTS calendario_historico 
+                      (id INTEGER PRIMARY KEY, fecha_semana DATE, dia_semana TEXT, proveedores TEXT)''')
+    
+    # Datos iniciales si la tabla está vacía
+    cursor.execute("SELECT COUNT(*) FROM proveedores_maestro")
+    if cursor.fetchone()[0] == 0:
+        provs = [("POLAR", "JESÚS PÉREZ"), ("OXFORD", "MAIKEL GARCÍA"), ("DIVAR", "MARVEL GARCÍA")]
+        cursor.executemany("INSERT INTO proveedores_maestro (nombre, comprador_habitual) VALUES (?,?)", provs)
+    conn.commit()
+    return conn
 
-# --- BASE DE DATOS Y ESTADO INICIAL ---
-if 'db_compradores' not in st.session_state:
-    st.session_state.db_compradores = {
-        "DIVAR": "Marvel García",
-        "OXFORD": "Maikel García",
-        "JONEAL": "Maikel García",
-        "POLAR": "Jesús Pérez",
-        "COLGATE": "Verónica Lugo"
-    }
+def guardar_calendario(fecha, calendario_dict):
+    conn = sqlite3.connect('calendario.db')
+    cursor = conn.cursor()
+    for dia, lista_provs in calendario_dict.items():
+        provs_str = ",".join(lista_provs)
+        cursor.execute('''INSERT OR REPLACE INTO calendario_historico (fecha_semana, dia_semana, proveedores) 
+                          VALUES (?, ?, ?)''', (fecha, dia, provs_str))
+    conn.commit()
+    conn.close()
 
-if 'historial' not in st.session_state:
-    st.session_state.historial = {
-        "Semana 10": {"status": "✅ Completo", "count": "12 proveedores", "color": "normal"},
-        "Semana 11": {"status": "⚠️ Pendiente de revisión", "count": "1 error, 15 proveedores", "color": "alert"},
-        "Semana 12": {"status": "⚠ No monitoreado", "count": "0 proveedores", "color": "normal"},
-        "Semana Actual": {"status": "✅ Completo", "count": "14 proveedores", "color": "normal"}
-    }
+def cargar_semana(fecha):
+    conn = sqlite3.connect('calendario.db')
+    df = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", 
+                           conn, params=(fecha,))
+    conn.close()
+    if df.empty:
+        return None
+    return dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
 
-if 'calendario' not in st.session_state:
-    st.session_state.calendario = {
-        "Lunes": ["Polar", "Dimassi", "Ponce"],
-        "Martes": ["Colgate", "Isola/Bonbon", "Jai - Suro"],
-        "Miércoles": ["Alive", "Fisa-Wayne"],
-        "Jueves": ["Pharsana", "American Colors", "Medifort"],
-        "Viernes": ["Oxford", "Joneal", "DIVAR"],
-        "Sábado": [],
-        "Domingo": []
-    }
+# --- 2. LÓGICA DE FECHAS Y NAVEGACIÓN ---
+if 'fecha_referencia' not in st.session_state:
+    hoy = datetime.now()
+    st.session_state.fecha_referencia = (hoy - timedelta(days=hoy.weekday())).date()
 
-if 'selected_week' not in st.session_state:
-    st.session_state.selected_week = "Semana Actual"
-
-# --- SIDEBAR: MENÚ DE CONFIGURACIÓN ---
+# --- 3. SIDEBAR (UX PROFESIONAL) ---
 with st.sidebar:
     st.header("⚙️ Menú de Configuración")
-    dia_editar = st.selectbox("Seleccionar día para editar:", list(st.session_state.calendario.keys()), index=4)
+    st.info(f"Semana: {st.session_state.fecha_referencia}")
     
-    nuevo_prov = st.text_input(
-        "Añadir proveedor para monitoreo:", 
-        placeholder="Añadir proveedor para monitoreo (Ej: DIVAR, Oxford...)"
-    )
-    
-    if st.button("Guardar Cambios", use_container_width=True):
-        if nuevo_prov:
-            st.session_state.calendario[dia_editar].append(nuevo_prov.strip())
-            st.success(f"Proveedor {nuevo_prov} añadido a {dia_editar}")
-            st.rerun()
+    # Navegación de semanas
+    col_nav1, col_nav2 = st.columns(2)
+    if col_nav1.button("⬅️ Anterior"):
+        st.session_state.fecha_referencia -= timedelta(days=7)
+        st.rerun()
+    if col_nav2.button("Siguiente ➡️"):
+        st.session_state.fecha_referencia += timedelta(days=7)
+        st.rerun()
 
-# --- CUERPO PRINCIPAL ---
+    st.divider()
+    st.subheader("Edición Rápida")
+    dia_edit = st.selectbox("Día para editar:", ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"])
+    
+    # Cargar datos actuales para el editor
+    cal_actual = cargar_semana(st.session_state.fecha_referencia) or {d: [] for d in ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]}
+    provs_input = st.text_area(f"Proveedores para {dia_edit}:", value=", ".join(cal_actual.get(dia_edit, [])))
+    
+    if st.button("💾 Guardar en Base de Datos", use_container_width=True):
+        cal_actual[dia_edit] = [p.strip().upper() for p in provs_input.split(",") if p.strip()]
+        guardar_calendario(st.session_state.fecha_referencia, cal_actual)
+        st.success("¡Datos persistidos!")
+        st.rerun()
+
+# --- 4. ÁREA PRINCIPAL ---
 st.title("📅 Gestión de Calendario de Proveedores")
-st.subheader("Vista de Planificación")
 
-# Seccion de Historial Semanal
-st.write("### Semanas Anteriores")
-cols_hist = st.columns(4)
-for i, (semana, info) in enumerate(st.session_state.historial.items()):
-    with cols_hist[i]:
-        card_class = "week-card-alert" if info['color'] == "alert" else ""
-        if st.button(f"{semana}\n\n{info['status']}\n{info['count']}", key=f"btn_{semana}", use_container_width=True):
-            st.session_state.selected_week = semana
+# Historial Visual (Indicators)
+st.markdown("### Vista de Planificación")
+cols_h = st.columns(4)
+for i, offset in enumerate([-21, -14, -7, 0]):
+    f = st.session_state.fecha_referencia + timedelta(days=offset)
+    with cols_h[i]:
+        color = "🟢" if cargar_semana(f) else "⚪"
+        label = "Actual" if offset == 0 else f"Semana {f.strftime('%W')}"
+        st.metric(label=f"{color} {label}", value=f.strftime("%d-%m"))
 
-# Tabla de Planificación
-df_cal = pd.DataFrame.from_dict(st.session_state.calendario, orient='index').transpose()
-st.dataframe(df_cal.fillna("-"), use_container_width=True)
+# Tabla Maestra con Data Editor
+cal_data = cargar_semana(st.session_state.fecha_referencia) or {d: ["-"] for d in ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]}
+df_view = pd.DataFrame.from_dict(cal_data, orient='index').transpose()
+
+edited_df = st.data_editor(df_view, use_container_width=True, num_rows="dynamic", key="plan_editor")
 
 st.divider()
 
-# Sección de Ejecución RPA e Informe Lateral
-main_col, drawer_col = st.columns([3, 1])
+# --- 5. EJECUCIÓN RPA REFACTORIZADA ---
+st.subheader("🤖 Ejecución de RPA")
+sucursal = st.selectbox("Sucursal:", ["CENDIGLATIRE", "CENDI 4 DE MAYO"])
 
-with main_col:
-    st.subheader("🤖 Ejecución de RPA")
-    sucursal_target = st.selectbox("Sucursal a monitorear:", ["CENDIGLATIRE", "CENDI 4 DE MAYO"])
-    
-    if st.button("🚀 Iniciar Monitoreos de Hoy", type="primary"):
-        # Lógica de simulación de búsqueda basada en el script original
-        st.write("### Resultados de RPA")
-        
-        # Simulamos carga de datos para los proveedores de hoy (Viernes en el ejemplo)
-        provs_hoy = st.session_state.calendario["Viernes"]
-        
-        for prov in provs_hoy:
-            nombre_prov = prov.strip().upper()
-            comprador = st.session_state.db_compradores.get(nombre_prov, "Asignado")
-            
-            # Formato de tarjeta fija según imagen
-            st.markdown(f"""
-                <div class="rpa-card">
-                    <div class="rpa-header">
-                        <span>{nombre_prov}, 3 órdenes encontradas - Última ejecución: 10:32 AM</span>
-                        <span>👁️</span>
-                    </div>
-                    <div class="order-line">ID OC-01-023-00011833 | Total Delivery / Distribuida | Comprador: {comprador}</div>
-                    <div class="order-line">ID OC-01-023-00011853 | Total Delivery / Distribuida | Comprador: {comprador}</div>
-                    <div class="order-line">ID OC-01-023-00011853 | Total Delivery / Distribuida | Comprador: {comprador}</div>
-                </div>
-            """, unsafe_allow_html=True)
-            
-    st.button("📊 Ver Reporte Completo")
+if st.button("🚀 Iniciar Monitoreo Consolidado", type="primary"):
+    dia_hoy_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"][datetime.now().weekday()]
+    provs_hoy = cal_actual.get(dia_hoy_es, [])
 
-with drawer_col:
-    # Simulación de Drawer Lateral con JSON
-    st.markdown("#### leporte Completo de DIVAR")
-    report_json = {
-        "ID": "DIVAR",
-        "semanas_monitoreo": 708,
-        "proveedores": {
-            "Tipo Delivery": "Total",
-            "Estatus": "Autorizada",
-            "Tipo de distribución": "Distribuida"
-        },
-        "Remoto": "alere"
-    }
-    st.json(report_json)
+    if not provs_hoy or provs_hoy == ["-"]:
+        st.warning(f"No hay proveedores programados para hoy ({dia_hoy_es}).")
+    else:
+        with st.spinner("Descargando reporte y consolidando órdenes..."):
+            url = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
+            try:
+                res = requests.get(url)
+                df_raw = pd.read_excel(io.BytesIO(res.content), engine='openpyxl')
+                df_raw.columns = df_raw.columns.str.strip()
 
-if __name__ == "__main__":
-    pass
+                # Consolidación (Eliminamos st.expander)
+                mask = df_raw['Proveedor'].astype(str).str.upper().apply(lambda x: any(p in x for p in provs_hoy))
+                df_filtrado = df_raw[mask].copy()
+
+                if not df_filtrado.empty:
+                    st.subheader(f"📋 Órdenes de Compra - {dia_hoy_es}")
+                    
+                    # Mapeo de Comprador
+                    df_filtrado = df_filtrado.rename(columns={'Creado por': 'Comprador'})
+                    
+                    columnas_finales = ['Número de orden', 'Proveedor', 'Estatus', 'Tipo de entrega', 'Tipo de distribución', 'Comprador']
+                    
+                    # Visualización en Tabla Maestra (UX Requerida)
+                    st.dataframe(
+                        df_filtrado[columnas_finales],
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Número de orden": st.column_config.TextColumn("N° Orden"),
+                            "Estatus": st.column_config.SelectboxColumn("Estado", options=["Autorizada", "Pendiente"], default="Autorizada"),
+                            "Comprador": st.column_config.TextColumn("Comprador Asignado")
+                        }
+                    )
+                else:
+                    st.info("✅ No se encontraron órdenes activas para los proveedores de hoy.")
+            except Exception as e:
+                st.error(f"Error técnico: {e}")
+
+# Inicialización de DB al final para asegurar que Streamlit cargue primero
+init_db()
