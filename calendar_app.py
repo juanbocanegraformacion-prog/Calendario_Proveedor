@@ -1,10 +1,3 @@
-Para lograr que el monitoreo sea automático y se actualice sin necesidad de un botón, debemos encapsular la lógica de procesamiento en una función y llamarla directamente en el flujo principal de ejecución de Streamlit. 
-
-Al eliminar el botón, cada vez que cambies de semana o agregues un comprador, Streamlit volverá a ejecutar el script y actualizará los resultados en tiempo real.
-
-### Código Completo con Actualización Automática
-
-```python
 import streamlit as st
 import pandas as pd
 import requests
@@ -112,6 +105,9 @@ with st.sidebar:
             registrar_comprador(new_p, new_c)
         st.rerun()
 
+    if st.checkbox("Ver Compradores Registrados"):
+        st.table(obtener_compradores_autorizados())
+
 # --- 4. ÁREA PRINCIPAL ---
 st.title("📅 Monitor de Órdenes de Compra")
 
@@ -134,15 +130,19 @@ st.divider()
 # --- 5. LÓGICA DE MONITOREO AUTOMÁTICO ---
 st.subheader("🤖 Monitoreo en Tiempo Real")
 
-# Se ejecuta automáticamente al cargar la página
-dia_hoy_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"][datetime.now().weekday()]
+# Obtener día actual
+dia_hoy_idx = datetime.now().weekday()
+dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+dia_hoy_es = dias_semana[dia_hoy_idx]
+
+# Buscar proveedores para el día actual en la planificación cargada
 provs_hoy = cal_actual.get(dia_hoy_es, [])
 
 if not provs_hoy or provs_hoy == ["-"]:
     st.info(f"No hay proveedores programados para hoy ({dia_hoy_es}).")
 else:
-    # Usamos cache para no saturar GitHub con peticiones en cada pequeño cambio
-    @st.cache_data(ttl=300) # Se actualiza cada 5 minutos
+    # Caché de 5 minutos para la descarga de datos
+    @st.cache_data(ttl=300)
     def obtener_datos_github(url):
         res = requests.get(url)
         return pd.read_excel(io.BytesIO(res.content), engine='openpyxl')
@@ -154,33 +154,31 @@ else:
         df_raw.columns = df_raw.columns.str.strip()
         df_raw = df_raw.rename(columns={'Creado por': 'Comprador'})
 
+        # Cargar registro de compradores autorizados
         df_aut = obtener_compradores_autorizados()
-        df_aut['key'] = df_aut['nombre'].str.upper() + "|" + df_aut['comprador_habitual'].str.upper()
+        df_aut['key'] = df_aut['nombre'].str.upper().str.strip() + "|" + df_aut['comprador_habitual'].str.upper().str.strip()
         set_autorizados = set(df_aut['key'].tolist())
 
         def validar(row):
             p_ex = str(row['Proveedor']).upper().strip()
             c_ex = str(row['Comprador']).upper().strip()
-            if not any(p in p_ex for p in provs_hoy): return False
+            # Validar si el proveedor está en la lista de hoy
+            if not any(p in p_ex for p in provs_hoy): 
+                return False
+            # Validar si la combinación proveedor-comprador existe en la base de datos
             return f"{p_ex}|{c_ex}" in set_autorizados
 
         df_filtrado = df_raw[df_raw.apply(validar, axis=1)].copy()
 
         if not df_filtrado.empty:
-            st.success(f"Órdenes validadas encontradas para hoy ({dia_hoy_es}):")
-            st.dataframe(df_filtrado[['Número de orden', 'Proveedor', 'Estatus', 'Comprador']], use_container_width=True, hide_index=True)
+            st.success(f"Órdenes validadas para hoy ({dia_hoy_es}):")
+            st.dataframe(
+                df_filtrado[['Número de orden', 'Proveedor', 'Estatus', 'Comprador']], 
+                use_container_width=True, 
+                hide_index=True
+            )
         else:
-            st.info("✅ Sin órdenes que coincidan con los criterios de hoy.")
+            st.info(f"✅ No se encontraron órdenes que coincidan con los criterios para {dia_hoy_es}.")
             
     except Exception as e:
-        st.error(f"Error al sincronizar con GitHub: {e}")
-```
-
-### Sugerencias y Mejoras Aplicadas:
-
-* **Uso de `st.cache_data`**: Al ser una actualización automática, Streamlit ejecutaría la descarga del Excel cada vez que muevas un mouse o escribas algo. He añadido un caché de **5 minutos** (`ttl=300`) para que la app sea fluida y no bloquee el sitio por exceso de peticiones.
-* **Estado Silencioso**: He cambiado el `st.spinner` por una carga más sutil. Si no hay datos, muestra un `st.info` en lugar de una advertencia para que la interfaz se sienta más limpia.
-* **Sincronización de Mayúsculas**: He reforzado el `.str.upper()` en la creación de la `key` de autorizados para evitar que un error de escritura en la base de datos rompa el monitoreo.
-* **Flujo UX**: Al quitar el botón, el usuario percibe la herramienta como un "Dashboard" vivo. Esto es ideal para pantallas que se dejan abiertas para monitoreo constante.
-
-¿Te gustaría que añadiera un temporizador visual que indique en cuánto tiempo se volverá a sincronizar el archivo de GitHub?
+        st.error(f"Error al sincronizar datos: {e}")
