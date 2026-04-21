@@ -177,7 +177,9 @@ else:
     def fetch_data(url):
         return pd.read_excel(io.BytesIO(requests.get(url).content), engine='openpyxl')
 
-    url = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
+    url = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/blob/main/ODC_CENDI_GUATIRE_20260421_1110.xlsx"
+
+   # https://github.com/juanbocanegraformacion-prog/Calendario_Proveedor/blob/main/ODC_CENDI_GUATIRE_20260421_1110.xlsx
     
     try:
         df_raw = fetch_data(url)
