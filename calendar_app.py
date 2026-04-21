@@ -177,7 +177,7 @@ else:
     def fetch_data(url):
         return pd.read_excel(io.BytesIO(requests.get(url).content), engine='openpyxl')
 
-    url = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/blob/main/ODC_CENDI_GUATIRE_20260421_1110.xlsx"
+    url = "https://github.com/juanbocanegraformacion-prog/Calendario_Proveedor/blob/main/ODC_CENDI_GUATIRE_20260421_1110.xlsx"
 
    # https://github.com/juanbocanegraformacion-prog/Calendario_Proveedor/blob/main/ODC_CENDI_GUATIRE_20260421_1110.xlsx
     
