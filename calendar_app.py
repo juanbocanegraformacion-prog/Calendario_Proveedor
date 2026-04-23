@@ -23,141 +23,191 @@ def init_db():
     conn.commit()
     conn.close()
 
+def forzar_reset_maestro():
+    conn = sqlite3.connect('calendario.db')
+    cursor = conn.cursor()
+    cursor.execute("DROP TABLE IF EXISTS proveedores_maestro")
+    conn.commit()
+    conn.close()
+    st.cache_data.clear()
+
 init_db()
 
-# --- LÓGICA DE HERENCIA DINÁMICA (LA CLAVE) ---
-def cargar_semana(fecha_consulta):
+def registrar_comprador(proveedor, comprador):
     conn = sqlite3.connect('calendario.db')
-    fecha_str = str(fecha_consulta)
-    
-    # 1. Intentar cargar la semana exacta
-    df = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", 
-                           conn, params=(fecha_str,))
-    
-    if not df.empty:
-        conn.close()
-        return dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
-    
-    # 2. Si la semana está vacía, buscamos la FECHA MÁS RECIENTE grabada en el pasado
     cursor = conn.cursor()
-    cursor.execute("SELECT MAX(fecha_semana) FROM calendario_historico WHERE fecha_semana < ?", (fecha_str,))
-    ultima_fecha_disponible = cursor.fetchone()[0]
-    
-    if ultima_fecha_disponible:
-        df_heredado = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", 
-                                        conn, params=(ultima_fecha_disponible,))
+    p_up, c_up = proveedor.strip().upper(), comprador.strip().upper()
+    try:
+        cursor.execute("SELECT 1 FROM proveedores_maestro WHERE nombre = ? AND comprador_habitual = ?", (p_up, c_up))
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO proveedores_maestro (nombre, comprador_habitual) VALUES (?, ?)", (p_up, c_up))
+            conn.commit()
         conn.close()
-        if not df_heredado.empty:
-            return dict(zip(df_heredado['dia_semana'], df_heredado['proveedores'].apply(lambda x: x.split(',') if x else [])))
-    
+        return True
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False
+
+def eliminar_comprador(id_registro):
+    conn = sqlite3.connect('calendario.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM proveedores_maestro WHERE id = ?", (id_registro,))
+    conn.commit()
     conn.close()
-    # 3. Si no hay absolutamente nada en la DB, devolver estructura vacía
-    return {d: [] for d in ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]}
+
+def obtener_compradores_autorizados():
+    conn = sqlite3.connect('calendario.db')
+    # Traemos el ID para poder gestionar acciones
+    df = pd.read_sql_query("SELECT id, nombre, comprador_habitual FROM proveedores_maestro", conn)
+    conn.close()
+    return df
 
 def guardar_calendario(fecha, calendario_dict):
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     for dia, lista_provs in calendario_dict.items():
-        provs_str = ",".join([p.strip().upper() for p in lista_provs if p.strip()])
+        provs_str = ",".join(lista_provs)
         cursor.execute('''INSERT OR REPLACE INTO calendario_historico (fecha_semana, dia_semana, proveedores) 
                           VALUES (?, ?, ?)''', (str(fecha), dia, provs_str))
     conn.commit()
     conn.close()
 
-# --- LÓGICA DE COMPRADORES ---
-def obtener_compradores_autorizados():
+def cargar_semana(fecha):
     conn = sqlite3.connect('calendario.db')
-    df = pd.read_sql_query("SELECT id, nombre, comprador_habitual FROM proveedores_maestro", conn)
+    df = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", 
+                           conn, params=(str(fecha),))
     conn.close()
-    return df
+    if df.empty: return None
+    return dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
 
-# --- 2. GESTIÓN DE ESTADO Y FECHAS ---
+# --- 2. LÓGICA DE FECHAS ---
 if 'fecha_referencia' not in st.session_state:
     hoy = datetime.now()
     st.session_state.fecha_referencia = (hoy - timedelta(days=hoy.weekday())).date()
 
 # --- 3. SIDEBAR ---
 with st.sidebar:
-    st.header("⚙️ Configuración")
+    st.header("⚙️ Panel de Configuración")
     
-    st.subheader("📅 Planificación")
-    dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
-    dia_edit = st.selectbox("Día a editar:", dias_semana)
-    
-    # Cargamos la planificación (aquí se aplica la herencia si la semana es nueva)
-    cal_actual = cargar_semana(st.session_state.fecha_referencia)
-    
-    provs_input = st.text_area("Proveedores (sep. por coma):", 
-                               value=", ".join(cal_actual.get(dia_edit, [])))
+    with st.expander("🛠️ Herramientas de Sistema"):
+        if st.button("Reparar Base de Datos"):
+            forzar_reset_maestro()
+            st.success("Tabla reseteada.")
+            st.rerun()
 
-    if st.button("💾 Guardar Semana Actual"):
+    st.divider()
+    st.subheader("📅 Planificación Semanal")
+    dia_edit = st.selectbox("Día:", ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"])
+    cal_actual = cargar_semana(st.session_state.fecha_referencia) or {d: [] for d in ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]}
+    provs_input = st.text_area("Proveedores (sep. por coma):", value=", ".join(cal_actual.get(dia_edit, [])))
+
+    st.divider()
+    st.subheader("👤 Registro de Compradores")
+    new_p = st.text_input("Proveedor:")
+    new_c = st.text_input("Comprador:")
+    
+    if st.button("💾 Guardar Cambios"):
         cal_actual[dia_edit] = [p.strip().upper() for p in provs_input.split(",") if p.strip()]
         guardar_calendario(st.session_state.fecha_referencia, cal_actual)
-        st.success(f"Configuración fijada para la semana {st.session_state.fecha_referencia}")
+        if new_p and new_c:
+            registrar_comprador(new_p, new_c)
         st.rerun()
 
-# --- 4. CUERPO PRINCIPAL ---
+    st.divider()
+    # SECCIÓN: GESTIÓN DE COMPRADORES (ELIMINAR / MODIFICAR)
+    if st.checkbox("🔍 Gestionar Compradores"):
+        df_m = obtener_compradores_autorizados()
+        if not df_m.empty:
+            st.caption("Para modificar, use el editor. Para eliminar, use el botón rojo.")
+            # Usamos data_editor para permitir modificaciones directas
+            edited_m = st.data_editor(df_m, 
+                                     column_config={"id": None}, # Ocultar ID
+                                     hide_index=True, 
+                                     use_container_width=True,
+                                     key="editor_compradores")
+            
+            # Lógica para detectar cambios en el editor y actualizar DB
+            if st.button("🔄 Aplicar Cambios Realizados"):
+                conn = sqlite3.connect('calendario.db')
+                for index, row in edited_m.iterrows():
+                    conn.execute("UPDATE proveedores_maestro SET nombre = ?, comprador_habitual = ? WHERE id = ?", 
+                                 (row['nombre'].upper(), row['comprador_habitual'].upper(), row['id']))
+                conn.commit()
+                conn.close()
+                st.success("Registros actualizados")
+                st.rerun()
+
+            # Lógica para eliminar
+            id_borrar = st.selectbox("Seleccione comprador para eliminar:", df_m['comprador_habitual'])
+            if st.button("🗑️ Eliminar Registro Seleccionado", type="primary"):
+                eliminar_comprador(id_borrar)
+                st.toast(f"Registro {id_borrar} eliminado")
+                st.rerun()
+        else:
+            st.info("No hay compradores registrados.")
+
+
+# --- 4. ÁREA PRINCIPAL ---
 st.title("📅 Monitor de Órdenes de Compra")
 
-col1, col2, col3 = st.columns([1,2,1])
-with col1:
-    if st.button("⬅️ Semana Anterior"):
+c1, c2, c3 = st.columns([1,2,1])
+with c1:
+    if st.button("⬅️ Anterior"):
         st.session_state.fecha_referencia -= timedelta(days=7)
         st.rerun()
-with col3:
-    if st.button("Siguiente Semana ➡️"):
+with c3:
+    if st.button("Siguiente ➡️"):
         st.session_state.fecha_referencia += timedelta(days=7)
         st.rerun()
 
-st.markdown(f"### Visualizando: Semana del {st.session_state.fecha_referencia}")
-
-# Cargamos los datos que se mostrarán en la tabla
-cal_data_display = cargar_semana(st.session_state.fecha_referencia)
-df_display = pd.DataFrame.from_dict(cal_data_display, orient='index').transpose().fillna("-")
-st.dataframe(df_display, use_container_width=True, hide_index=True)
+st.markdown(f"### Planificación Semana: {st.session_state.fecha_referencia}")
+cal_data = cargar_semana(st.session_state.fecha_referencia) or {d: ["-"] for d in ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]}
+st.data_editor(pd.DataFrame.from_dict(cal_data, orient='index').transpose(), use_container_width=True, hide_index=True)
 
 st.divider()
 
-# --- 5. MONITOREO EN TIEMPO REAL ---
+# --- 5. LÓGICA DE MONITOREO AUTOMÁTICO ---
 st.subheader("🤖 Monitoreo en Tiempo Real")
 
-# Determinamos el día de hoy según el sistema
 dia_hoy_idx = datetime.now().weekday()
-dia_hoy_nombre = dias_semana[dia_hoy_idx]
+dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+dia_hoy_es = dias_semana[dia_hoy_idx]
 
-# IMPORTANTE: El monitoreo debe usar la fecha real de hoy para buscar proveedores, 
-# pero si estamos navegando en el futuro, usaremos los proveedores de la semana que estamos viendo.
-provs_hoy = [p for p in cal_data_display.get(dia_hoy_nombre, []) if p and p != "-"]
+provs_hoy = cal_actual.get(dia_hoy_es, [])
 
-if not provs_hoy:
-    st.warning(f"No hay proveedores programados para hoy ({dia_hoy_nombre}) en la planificación seleccionada.")
+if not provs_hoy or provs_hoy == ["-"]:
+    st.info(f"No hay proveedores programados para hoy ({dia_hoy_es}).")
 else:
-    st.success(f"Proveedores activos hoy ({dia_hoy_nombre}): {', '.join(provs_hoy)}")
-    
-    # Lógica de sincronización con Excel...
+    @st.cache_data(ttl=300)
+    def obtener_datos_github(url):
+        res = requests.get(url)
+        return pd.read_excel(io.BytesIO(res.content), engine='openpyxl')
+
     url_excel = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/odc_alerta.xlsx"
+    
     try:
-        res = requests.get(url_excel)
-        df_raw = pd.read_excel(io.BytesIO(res.content), engine='openpyxl')
+        df_raw = obtener_datos_github(url_excel)
         df_raw.columns = df_raw.columns.str.strip()
         df_raw = df_raw.rename(columns={'Creado por': 'Comprador'})
-        
+
         df_aut = obtener_compradores_autorizados()
-        df_aut['key'] = df_aut['nombre'].str.upper().strip() + "|" + df_aut['comprador_habitual'].str.upper().strip()
-        set_aut = set(df_aut['key'].tolist())
+        # Aseguramos que la validación use los datos frescos
+        df_aut['key'] = df_aut['nombre'].str.upper().str.strip() + "|" + df_aut['comprador_habitual'].str.upper().str.strip()
+        set_autorizados = set(df_aut['key'].tolist())
 
         def validar(row):
             p_ex = str(row['Proveedor']).upper().strip()
             c_ex = str(row['Comprador']).upper().strip()
-            # Valida si el proveedor del Excel coincide con la lista planificada (heredada o actual)
             if not any(p in p_ex for p in provs_hoy): return False
-            return f"{p_ex}|{c_ex}" in set_aut
+            return f"{p_ex}|{c_ex}" in set_autorizados
 
         df_filtrado = df_raw[df_raw.apply(validar, axis=1)].copy()
 
         if not df_filtrado.empty:
-            st.dataframe(df_filtrado[['Número de orden', 'Proveedor', 'Estatus', 'Comprador']], use_container_width=True)
+            st.success(f"Órdenes validadas para hoy ({dia_hoy_es}):")
+            st.dataframe(df_filtrado[['Número de orden', 'Proveedor', 'Estatus', 'Comprador']], use_container_width=True, hide_index=True)
         else:
-            st.info("No se encontraron órdenes para los proveedores planificados.")
+            st.info(f"✅ Sin órdenes pendientes para {dia_hoy_es} con los compradores autorizados.")
+            
     except Exception as e:
-        st.error(f"Error de conexión: {e}")
+        st.error(f"Error al sincronizar datos: {e}")
