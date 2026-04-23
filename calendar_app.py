@@ -71,34 +71,38 @@ def guardar_calendario(fecha, calendario_dict):
     conn.commit()
     conn.close()
 
+# --- FUNCIÓN CORREGIDA CON LÓGICA DE HERENCIA ---
 def cargar_semana(fecha):
     conn = sqlite3.connect('calendario.db')
-    # 1. Intentar cargar la semana solicitada
+    
+    # PASO 1: Intentar cargar la semana específica solicitada (Historial)
     df = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", 
                            conn, params=(str(fecha),))
     
+    # Si encontramos datos directos, los usamos
     if not df.empty:
         conn.close()
         return dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
     
-    # 2. LÓGICA DE RECURRENCIA: Si no existe, buscar la semana más cercana hacia ATRÁS que tenga datos
+    # PASO 2: LÓGICA DE HERENCIA (Si la semana actual está vacía)
+    # Buscamos en la base de datos la semana anterior más cercana que TENGA DATOS
     df_prev = pd.read_sql_query('''SELECT dia_semana, proveedores FROM calendario_historico 
                                    WHERE fecha_semana < ? 
-                                   ORDER BY fecha_semana DESC, id DESC LIMIT 7''', 
+                                   ORDER BY fecha_semana DESC LIMIT 7''', 
                                    conn, params=(str(fecha),))
     conn.close()
     
+    # Si encontramos una semana pasada con datos, heredamos esa configuración
     if not df_prev.empty:
-        # Reconstruir el diccionario desde la semana pasada encontrada
+        # st.toast(f"Heredando planificación de semana anterior...") # Opcional: avisar al usuario
         return dict(zip(df_prev['dia_semana'], df_prev['proveedores'].apply(lambda x: x.split(',') if x else [])))
     
-    # 3. Si es la primera vez o no hay historial, devolver vacío
+    # PASO 3: Si es la primera vez absoluta que se usa el sistema y no hay historial
     return None
 
 # --- 2. LÓGICA DE FECHAS ---
 if 'fecha_referencia' not in st.session_state:
     hoy = datetime.now()
-    # Normalizar al lunes de la semana actual
     st.session_state.fecha_referencia = (hoy - timedelta(days=hoy.weekday())).date()
 
 # --- 3. SIDEBAR ---
@@ -113,11 +117,12 @@ with st.sidebar:
 
     st.divider()
     st.subheader("📅 Planificación Semanal")
-    dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
-    dia_edit = st.selectbox("Día:", dias_semana)
+    # Asegurar orden correcto de los días
+    dias_semana_ordenados = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    dia_edit = st.selectbox("Día:", dias_semana_ordenados)
     
-    # Cargar datos (usando la nueva lógica de recurrencia)
-    cal_actual = cargar_semana(st.session_state.fecha_referencia) or {d: [] for d in dias_semana}
+    # Cargar usando la nueva lógica hereditaria
+    cal_actual = cargar_semana(st.session_state.fecha_referencia) or {d: [] for d in dias_semana_ordenados}
     provs_input = st.text_area("Proveedores (sep. por coma):", value=", ".join(cal_actual.get(dia_edit, [])))
 
     st.divider()
@@ -126,14 +131,12 @@ with st.sidebar:
     new_c = st.text_input("Comprador Asignado:")
     
     if st.button("💾 Guardar Cambios"):
-        # Guardamos la semana actual (esto crea el registro histórico para esta semana)
+        # Guardar crea un registro histórico para ESTA semana específica
         cal_actual[dia_edit] = [p.strip().upper() for p in provs_input.split(",") if p.strip()]
         guardar_calendario(st.session_state.fecha_referencia, cal_actual)
-        
         if new_p and new_c:
             registrar_comprador(new_p, new_c)
-            
-        st.success("Datos actualizados. Esta configuración se repetirá en las semanas siguientes.")
+        st.success("Datos actualizados. Esta configuración se repetirá en las semanas siguientes si no se modifica.")
         st.rerun()
 
     st.divider()
@@ -177,20 +180,20 @@ st.title("📅 Monitor de Órdenes de Compra")
 
 c1, c2, c3 = st.columns([1,2,1])
 with c1:
-    if st.button("⬅️ Semana Anterior"):
+    if st.button("⬅️ Anterior"):
         st.session_state.fecha_referencia -= timedelta(days=7)
         st.rerun()
 with c3:
-    if st.button("Siguiente Semana ➡️"):
+    if st.button("Siguiente ➡️"):
         st.session_state.fecha_referencia += timedelta(days=7)
         st.rerun()
 
 st.markdown(f"### Planificación Semana: {st.session_state.fecha_referencia}")
 
-# Obtener datos para mostrar en la tabla principal (aplica recurrencia)
-cal_data = cargar_semana(st.session_state.fecha_referencia) or {d: ["-"] for d in dias_semana}
+# Obtener los datos para la tabla principal (usando lógica hereditaria)
+cal_data = cargar_semana(st.session_state.fecha_referencia) or {d: ["-"] for d in dias_semana_ordenados}
 
-# Preparar DataFrame para visualización limpia
+# Visualización limpia de la tabla
 df_visual = pd.DataFrame.from_dict(cal_data, orient='index').transpose().fillna("-")
 st.data_editor(df_visual, use_container_width=True, hide_index=True)
 
@@ -199,13 +202,21 @@ st.divider()
 # --- 5. LÓGICA DE MONITOREO AUTOMÁTICO ---
 st.subheader("🤖 Monitoreo en Tiempo Real")
 
+# Necesitamos recargar cal_actual aquí para asegurar que provs_hoy use la planificación correcta
+# (ya sea heredada o explícita) para el día de monitoreo.
+cal_actual_monitoreo = cargar_semana(st.session_state.fecha_referencia) or {}
+
 dia_hoy_idx = datetime.now().weekday()
-dia_hoy_es = dias_semana[dia_hoy_idx]
+# Usar la lista ordenada para asegurar match
+dia_hoy_es = dias_semana_ordenados[dia_hoy_idx]
 
-# provs_hoy toma la planificación de la semana actual cargada (con recurrencia)
-provs_hoy = cal_data.get(dia_hoy_es, [])
+# Obtener proveedores de la planificación cargada (que puede ser heredada)
+provs_hoy = cal_actual_monitoreo.get(dia_hoy_es, [])
 
-if not provs_hoy or provs_hoy == ["-"]:
+# Limpiar guiones de visualización si heredamos una semana muy vieja sin datos
+provs_hoy = [p for p in provs_hoy if p != "-"]
+
+if not provs_hoy:
     st.info(f"No hay proveedores programados para hoy ({dia_hoy_es}).")
 else:
     @st.cache_data(ttl=300)
@@ -231,8 +242,8 @@ else:
             def validar(row):
                 p_ex = str(row['Proveedor']).upper().strip()
                 c_ex = str(row['Comprador']).upper().strip()
-                # Verificar si el proveedor del Excel está en la lista programada de hoy
-                if not any(p in p_ex for p in provs_hoy if p != "-"): return False
+                # Verificar si el proveedor del Excel está en la planificación heredada/actual de hoy
+                if not any(p in p_ex for p in provs_hoy): return False
                 return f"{p_ex}|{c_ex}" in set_autorizados
 
             df_filtrado = df_raw[df_raw.apply(validar, axis=1)].copy()
