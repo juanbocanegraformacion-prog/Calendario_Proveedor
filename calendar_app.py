@@ -72,22 +72,27 @@ def guardar_calendario(fecha, calendario_dict):
     conn.close()
 
 def cargar_semana(fecha):
-    # 1. Si la semana ya fue guardada, se carga directamente
-    df = pd.read_sql_query(... WHERE fecha_semana = ? ...)
+    conn = sqlite3.connect('calendario.db')
+    # 1. Intentar cargar la semana solicitada
+    df = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", 
+                           conn, params=(str(fecha),))
+    
     if not df.empty:
-        return dict(...)
-
-    # 2. Si no existe, busca la semana con datos más cercana hacia ATRÁS
-    df_prev = pd.read_sql_query('''
-        SELECT dia_semana, proveedores FROM calendario_historico
-        WHERE fecha_semana < ?
-        ORDER BY fecha_semana DESC, id DESC LIMIT 7
-    ''', ...)
-
+        conn.close()
+        return dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
+    
+    # 2. LÓGICA DE RECURRENCIA: Si no existe, buscar la semana más cercana hacia ATRÁS que tenga datos
+    df_prev = pd.read_sql_query('''SELECT dia_semana, proveedores FROM calendario_historico 
+                                   WHERE fecha_semana < ? 
+                                   ORDER BY fecha_semana DESC, id DESC LIMIT 7''', 
+                                   conn, params=(str(fecha),))
+    conn.close()
+    
     if not df_prev.empty:
-        # Reconstruye el diccionario desde esa semana anterior
-        return dict(zip(...))
-    # 3. Si no hay historial, devuelve vacío
+        # Reconstruir el diccionario desde la semana pasada encontrada
+        return dict(zip(df_prev['dia_semana'], df_prev['proveedores'].apply(lambda x: x.split(',') if x else [])))
+    
+    # 3. Si es la primera vez o no hay historial, devolver vacío
     return None
 
 # --- 2. LÓGICA DE FECHAS ---
