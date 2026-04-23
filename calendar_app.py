@@ -114,37 +114,30 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    # SECCIÓN: GESTIÓN DE COMPRADORES (ELIMINAR / MODIFICAR)
-    if st.checkbox("🔍 Gestionar Compradores"):
-        df_m = obtener_compradores_autorizados()
-        if not df_m.empty:
-            st.caption("Para modificar, use el editor. Para eliminar, use el botón rojo.")
-            # Usamos data_editor para permitir modificaciones directas
-            edited_m = st.data_editor(df_m, 
-                                     column_config={"id": None}, # Ocultar ID
-                                     hide_index=True, 
-                                     use_container_width=True,
-                                     key="editor_compradores")
-            
-            # Lógica para detectar cambios en el editor y actualizar DB
-            if st.button("🔄 Aplicar Cambios Realizados"):
-                conn = sqlite3.connect('calendario.db')
-                for index, row in edited_m.iterrows():
-                    conn.execute("UPDATE proveedores_maestro SET nombre = ?, comprador_habitual = ? WHERE id = ?", 
-                                 (row['nombre'].upper(), row['comprador_habitual'].upper(), row['id']))
-                conn.commit()
-                conn.close()
-                st.success("Registros actualizados")
-                st.rerun()
-
-            # Lógica para eliminar
-            id_borrar = st.selectbox("Seleccione comprador para eliminar:", df_m['comprador_habitual'])
-            if st.button("🗑️ Eliminar Registro Seleccionado", type="primary"):
-                eliminar_comprador(id_borrar)
-                st.toast(f"Registro {id_borrar} eliminado")
-                st.rerun()
+      # Gestión de Compradores (Debajo de proveedores)
+    st.divider()
+    st.subheader("👤 Registro de Compradores")
+    new_p = st.text_input("Proveedor (Ej: POLAR):")
+    new_c = st.text_input("Comprador (Ej: JESUS PEREZ):")
+    
+    if st.button("💾 Guardar Cambios"):
+        # 1. Guardar calendario
+        cal_actual[dia_edit] = [p.strip().upper() for p in provs_input.split(",") if p.strip()]
+        guardar_calendario(st.session_state.fecha_referencia, cal_actual)
+        
+        # 2. Registrar comprador (si hay datos)
+        if new_p and new_c:
+            exito = registrar_comprador(new_p, new_c)
+            if not exito:
+                st.error("Error de integridad. Use 'Reparar Base de Datos' arriba.")
+            else:
+                st.success(f"Vinculado {new_c} a {new_p}")
         else:
-            st.info("No hay compradores registrados.")
+            st.success("Calendario actualizado")
+        st.rerun()
+
+    if st.checkbox("Ver Compradores Registrados"):
+        st.table(obtener_compradores_autorizados())
 
 # --- 4. ÁREA PRINCIPAL ---
 st.title("📅 Monitor de Órdenes de Compra")
@@ -182,10 +175,7 @@ else:
         res = requests.get(url)
         return pd.read_excel(io.BytesIO(res.content), engine='openpyxl')
 
-    #url_excel = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
-    url_excel = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/odc_alerta.xlsx"
-                 
-    
+    url_excel = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
     
     try:
         df_raw = obtener_datos_github(url_excel)
