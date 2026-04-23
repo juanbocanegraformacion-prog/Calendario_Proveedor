@@ -182,7 +182,8 @@ else:
         res = requests.get(url)
         return pd.read_excel(io.BytesIO(res.content), engine='openpyxl')
 
-    url_excel = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
+    #url_excel = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/%C3%93rdenes%20de%20compra%2016_04_2026.xlsx"
+    url_excel = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/refs/heads/main/ODC_CENDI_GUATIRE_20260421_1110.xlsx"
     
     try:
         df_raw = obtener_datos_github(url_excel)
