@@ -21,7 +21,7 @@ def init_db():
     cursor.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_fecha_dia 
                       ON calendario_historico (fecha_semana, dia_semana)''')
     cursor.execute('''CREATE INDEX IF NOT EXISTS idx_fecha_semana 
-                      ON calendario_historico (fecha_semana)''')
+                      ON calendario_historico (fecha_semana)''')  # Índice para búsquedas rápidas
     conn.commit()
     conn.close()
 
@@ -64,14 +64,10 @@ def obtener_compradores_autorizados():
     return df
 
 def guardar_calendario(fecha, calendario_dict):
-    """
-    Guarda la planificación completa de una semana (todos los días) en la BD.
-    Usa INSERT OR REPLACE para no duplicar.
-    """
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     for dia, lista_provs in calendario_dict.items():
-        provs_str = ",".join(lista_provs) if lista_provs else ""
+        provs_str = ",".join(lista_provs)
         cursor.execute('''INSERT OR REPLACE INTO calendario_historico (fecha_semana, dia_semana, proveedores) 
                           VALUES (?, ?, ?)''', (str(fecha), dia, provs_str))
     conn.commit()
@@ -80,49 +76,51 @@ def guardar_calendario(fecha, calendario_dict):
 def cargar_semana(fecha):
     """
     Carga la planificación de una semana.
-    - Si existe en BD, la devuelve.
-    - Si no existe, busca la semana anterior más reciente (con datos) y la hereda.
-    - Si no hay ninguna semana anterior, devuelve una semana vacía.
+    Si no existe, hereda la configuración de la semana anterior más cercana con datos.
+    Si no hay historial, devuelve None.
     """
-    dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     conn = sqlite3.connect('calendario.db')
     try:
-        # 1. Intentar cargar la semana exacta
+        # 1. Intentar cargar la semana solicitada
         df = pd.read_sql_query(
             "SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?",
             conn, params=(str(fecha),)
         )
         if not df.empty:
-            # Semana encontrada
-            return _df_to_dict(df, dias_semana), False  # False = no heredado
+            # Convertir a diccionario con todos los días (por si faltan)
+            resultado = _df_to_dict(df)
+            conn.close()
+            return resultado
 
-        # 2. Buscar la semana anterior más reciente (con cualquier registro)
+        # 2. Buscar la semana anterior más reciente que tenga datos
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT fecha_semana FROM calendario_historico WHERE fecha_semana < ? ORDER BY fecha_semana DESC LIMIT 1",
+            "SELECT MAX(fecha_semana) FROM calendario_historico WHERE fecha_semana < ?",
             (str(fecha),)
         )
         row = cursor.fetchone()
-        if row:
+        if row and row[0]:
             fecha_anterior = row[0]
             df_prev = pd.read_sql_query(
                 "SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?",
                 conn, params=(fecha_anterior,)
             )
             if not df_prev.empty:
-                # Devolvemos los datos de la semana anterior + flag de herencia
-                return _df_to_dict(df_prev, dias_semana), True
+                resultado = _df_to_dict(df_prev)
+                conn.close()
+                return resultado
 
-        # 3. Sin historial: semana vacía
-        return {dia: [] for dia in dias_semana}, False
-    except Exception as e:
-        st.error(f"Error al cargar semana {fecha}: {e}")
-        return {dia: [] for dia in dias_semana}, False
-    finally:
+        # 3. Sin historial
         conn.close()
+        return None
+    except Exception as e:
+        print(f"Error al cargar semana {fecha}: {e}")
+        conn.close()
+        return None
 
-def _df_to_dict(df: pd.DataFrame, dias_semana: list) -> dict:
-    """Convierte un DataFrame (dia_semana, proveedores) a dict día -> lista."""
+def _df_to_dict(df: pd.DataFrame) -> dict:
+    """Convierte un DataFrame con columnas dia_semana y proveedores a un diccionario día -> lista."""
+    dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     resultado = {dia: [] for dia in dias_semana}
     for _, row in df.iterrows():
         dia = row['dia_semana']
@@ -137,6 +135,7 @@ def _df_to_dict(df: pd.DataFrame, dias_semana: list) -> dict:
 # --- 2. LÓGICA DE FECHAS ---
 if 'fecha_referencia' not in st.session_state:
     hoy = datetime.now()
+    # Normalizar al lunes de la semana actual
     st.session_state.fecha_referencia = (hoy - timedelta(days=hoy.weekday())).date()
 
 # --- 3. SIDEBAR ---
@@ -154,15 +153,9 @@ with st.sidebar:
     dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     dia_edit = st.selectbox("Día:", dias_semana)
     
-    # Cargar datos de la semana actual (con herencia)
-    cal_actual, es_heredado = cargar_semana(st.session_state.fecha_referencia)
-    if es_heredado:
-        st.info("ℹ️ Esta semana no tiene configuración propia. Se están mostrando los datos de la semana anterior. Puedes modificarlos y guardar para crear un nuevo registro.")
-    
-    provs_input = st.text_area(
-        "Proveedores (sep. por coma):",
-        value=", ".join(cal_actual.get(dia_edit, []))
-    )
+    # Cargar datos (usando la nueva lógica de recurrencia)
+    cal_actual = cargar_semana(st.session_state.fecha_referencia) or {d: [] for d in dias_semana}
+    provs_input = st.text_area("Proveedores (sep. por coma):", value=", ".join(cal_actual.get(dia_edit, [])))
 
     st.divider()
     st.subheader("👤 Registro de Compradores")
@@ -170,15 +163,14 @@ with st.sidebar:
     new_c = st.text_input("Comprador Asignado:")
     
     if st.button("💾 Guardar Cambios"):
-        # Actualizar el día editado
+        # Guardamos la semana actual (esto crea el registro histórico para esta semana)
         cal_actual[dia_edit] = [p.strip().upper() for p in provs_input.split(",") if p.strip()]
-        # Guardar la semana completa en la BD (esto crea un registro propio para esta fecha)
         guardar_calendario(st.session_state.fecha_referencia, cal_actual)
         
         if new_p and new_c:
             registrar_comprador(new_p, new_c)
-        
-        st.success("Datos guardados. Esta semana ahora tiene su propio registro y será heredada por semanas futuras.")
+            
+        st.success("Datos actualizados. Esta configuración se repetirá en las semanas siguientes.")
         st.rerun()
 
     st.divider()
@@ -212,7 +204,7 @@ with st.sidebar:
             
             if st.button("🗑️ Eliminar Proveedor Seleccionado", type="primary"):
                 eliminar_comprador(id_para_borrar)
-                st.toast("Registro eliminado con éxito")
+                st.toast(f"Registro eliminado con éxito")
                 st.rerun()
         else:
             st.info("No hay proveedores registrados.")
@@ -232,11 +224,10 @@ with c3:
 
 st.markdown(f"### Planificación Semana: {st.session_state.fecha_referencia}")
 
-# Obtener datos para mostrar en la tabla principal (ya se heredan automáticamente)
-cal_data, _ = cargar_semana(st.session_state.fecha_referencia)
+# Obtener datos para mostrar en la tabla principal (aplica recurrencia)
+cal_data = cargar_semana(st.session_state.fecha_referencia) or {d: ["-"] for d in dias_semana}
 
-# Convertir a DataFrame para visualización (mostrar los proveedores como lista)
-# Necesitamos una fila por día, así que transponemos
+# Preparar DataFrame para visualización limpia
 df_visual = pd.DataFrame.from_dict(cal_data, orient='index').transpose().fillna("-")
 st.data_editor(df_visual, use_container_width=True, hide_index=True)
 
@@ -248,9 +239,10 @@ st.subheader("🤖 Monitoreo en Tiempo Real")
 dia_hoy_idx = datetime.now().weekday()
 dia_hoy_es = dias_semana[dia_hoy_idx]
 
+# provs_hoy toma la planificación de la semana actual cargada (con recurrencia)
 provs_hoy = cal_data.get(dia_hoy_es, [])
 
-if not provs_hoy:
+if not provs_hoy or provs_hoy == ["-"]:
     st.info(f"No hay proveedores programados para hoy ({dia_hoy_es}).")
 else:
     @st.cache_data(ttl=300)
@@ -276,9 +268,8 @@ else:
             def validar(row):
                 p_ex = str(row['Proveedor']).upper().strip()
                 c_ex = str(row['Comprador']).upper().strip()
-                # Comparación exacta: el proveedor del Excel debe estar en la lista de hoy
-                if p_ex not in provs_hoy:
-                    return False
+                # Verificar si el proveedor del Excel está en la lista programada de hoy
+                if not any(p in p_ex for p in provs_hoy if p != "-"): return False
                 return f"{p_ex}|{c_ex}" in set_autorizados
 
             df_filtrado = df_raw[df_raw.apply(validar, axis=1)].copy()
