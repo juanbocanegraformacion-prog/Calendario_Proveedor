@@ -180,7 +180,21 @@ with st.sidebar:
                 st.rerun()
         else:
             st.info("No hay proveedores registrados.")
-
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    
+    # NUEVO: Botón de reinicio total
+    with st.expander("⚠️ Zona de Peligro"):
+        if st.button("REINICIAR TODA LA BASE DE DATOS"):
+            conn = sqlite3.connect('calendario.db')
+            cursor = conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS proveedores_maestro")
+            cursor.execute("DROP TABLE IF EXISTS calendario_historico")
+            conn.commit()
+            conn.close()
+            init_db() # Re-crea las tablas vacías
+            st.success("Base de datos borrada. Reiniciando...")
+            st.rerun()
 # --- 4. ÁREA PRINCIPAL ---
 st.title("📅 Monitor de Órdenes de Compra")
 
