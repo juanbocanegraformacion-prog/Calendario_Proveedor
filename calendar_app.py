@@ -8,11 +8,10 @@ from datetime import datetime, timedelta
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 
-# --- DEFINICIÓN GLOBAL DE VARIABLES ---
-# Definir aquí para evitar NameError en cualquier parte del código
+# --- VARIABLES GLOBALES ---
 dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
-# --- ESTILOS CSS PARA EL SISTEMA DE COLA ---
+# --- ESTILOS CSS (SISTEMA DE COLA) ---
 st.markdown("""
 <style>
     .main-order-container {
@@ -44,18 +43,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 1. PERSISTENCIA Y BASE DE DATOS ---
+# --- 1. BASE DE DATOS ---
 def init_db():
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS proveedores_maestro 
-                      (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                       nombre TEXT, 
-                       comprador_habitual TEXT)''')
+                      (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, comprador_habitual TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS calendario_historico 
                       (id INTEGER PRIMARY KEY, fecha_semana TEXT, dia_semana TEXT, proveedores TEXT)''')
-    cursor.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_fecha_dia 
-                      ON calendario_historico (fecha_semana, dia_semana)''')
+    cursor.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_fecha_dia ON calendario_historico (fecha_semana, dia_semana)''')
     conn.commit()
     conn.close()
 
@@ -64,8 +60,8 @@ init_db()
 def cargar_semana(fecha_consulta):
     conn = sqlite3.connect('calendario.db')
     fecha_str = str(fecha_consulta)
-    df = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", 
-                           conn, params=(fecha_str,))
+    df = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", conn, params=(fecha_str,))
+    
     if not df.empty:
         res = dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
         conn.close()
@@ -75,10 +71,10 @@ def cargar_semana(fecha_consulta):
     cursor.execute("SELECT MAX(fecha_semana) FROM calendario_historico WHERE fecha_semana < ?", (fecha_str,))
     ultima = cursor.fetchone()
     if ultima and ultima[0]:
-        df_h = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", 
-                                 conn, params=(ultima[0],))
+        df_h = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", conn, params=(ultima[0],))
         conn.close()
         return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(lambda x: x.split(',') if x else [])))
+    
     conn.close()
     return {d: [] for d in dias_semana}
 
@@ -87,8 +83,7 @@ def guardar_calendario(fecha, calendario_dict):
     cursor = conn.cursor()
     for dia, lista_provs in calendario_dict.items():
         provs_str = ",".join([p.strip().upper() for p in lista_provs if p.strip()])
-        cursor.execute("INSERT OR REPLACE INTO calendario_historico (fecha_semana, dia_semana, proveedores) VALUES (?, ?, ?)", 
-                       (str(fecha), dia, provs_str))
+        cursor.execute("INSERT OR REPLACE INTO calendario_historico (fecha_semana, dia_semana, proveedores) VALUES (?, ?, ?)", (str(fecha), dia, provs_str))
     conn.commit()
     conn.close()
 
@@ -138,10 +133,7 @@ with c3:
         st.session_state.fecha_referencia += timedelta(days=7); st.rerun()
 
 st.markdown(f"### Semana: {st.session_state.fecha_referencia}")
-
-# CARGA DE DATOS (Corregido para evitar NameError)
 cal_data = cargar_semana(st.session_state.fecha_referencia)
-
 df_visual = pd.DataFrame.from_dict(cal_data, orient='index').transpose().fillna("-")
 st.dataframe(df_visual, use_container_width=True, hide_index=True)
 
@@ -149,7 +141,6 @@ st.divider()
 
 # --- 5. MONITOREO (SISTEMA DE COLA) ---
 st.subheader("🤖 Monitoreo en Tiempo Real")
-
 dia_hoy_es = dias_semana[datetime.now().weekday()]
 provs_hoy = cal_data.get(dia_hoy_es, [])
 
@@ -163,4 +154,38 @@ else:
         df_raw.columns = df_raw.columns.str.strip()
         df_raw = df_raw.rename(columns={'Creado por': 'Comprador'})
         
-        df_aut
+        df_aut = obtener_compradores_autorizados()
+        df_aut['key'] = df_aut['nombre'].str.upper().str.strip() + "|" + df_aut['comprador_habitual'].str.upper().str.strip()
+        set_aut = set(df_aut['key'].tolist())
+
+        def validar(row):
+            p, c = str(row['Proveedor']).upper().strip(), str(row['Comprador']).upper().strip()
+            if not any(px in p for px in provs_hoy): return False
+            return f"{p}|{c}" in set_aut
+
+        df_f = df_raw[df_raw.apply(validar, axis=1)].copy()
+
+        if not df_f.empty:
+            ordenes = df_f.to_dict('records')
+            ultima = ordenes[-1]
+            anteriores = ordenes[:-1][::-1]
+
+            col_l, col_r = st.columns([2, 1])
+            with col_l:
+                st.markdown(f"""<div class="main-order-container">
+                    <div class="main-order-title">TURNO ACTUAL</div>
+                    <div class="main-order-number">{str(ultima['Número de orden'])[-4:]}</div>
+                    <div class="main-order-info">{ultima['Proveedor']}</div>
+                    <div style="color: #333;">Comprador: {ultima['Comprador']}</div>
+                </div>""", unsafe_allow_html=True)
+            with col_r:
+                st.markdown("<h4 style='text-align: center;'>EN ESPERA</h4>", unsafe_allow_html=True)
+                for o in anteriores[:4]:
+                    st.markdown(f"""<div class="queue-card">
+                        <div class="queue-number">#{str(o['Número de orden'])[-4:]}</div>
+                        <div class="queue-details"><b>{str(o['Proveedor'])[:15]}...</b><br>{o['Comprador']}</div>
+                    </div>""", unsafe_allow_html=True)
+        else:
+            st.info("Buscando órdenes validadas...")
+    except Exception as e:
+        st.error(f"Error en la sincronización: {e}")
