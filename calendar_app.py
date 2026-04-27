@@ -130,7 +130,7 @@ if not provs_hoy:
     st.info(f"No hay proveedores programados para hoy ({dia_hoy_es}).")
 else:
     # Lógica de Excel/GitHub
-    url_excel = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/odc_alerta.xlsx"
+    url_excel = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/ODC_alerta.xlsx"
     try:
         res = requests.get(url_excel)
         df_raw = pd.read_excel(io.BytesIO(res.content), engine='openpyxl')
