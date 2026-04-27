@@ -25,7 +25,7 @@ def init_db():
 
 init_db()
 
-# --- LÓGICA DE HERENCIA (INFALIBLE) ---
+# --- LÓGICA DE HERENCIA ---
 def cargar_semana(fecha_consulta):
     conn = sqlite3.connect('calendario.db')
     fecha_str = str(fecha_consulta)
@@ -46,7 +46,6 @@ def cargar_semana(fecha_consulta):
     
     if ultima_fecha_result and ultima_fecha_result[0]:
         ultima_fecha = ultima_fecha_result[0]
-        # st.toast(f"Heredando planificación de: {ultima_fecha}") # Opcional: Feedback visual
         df_heredado = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", 
                                         conn, params=(ultima_fecha,))
         conn.close()
@@ -87,22 +86,19 @@ if 'fecha_referencia' not in st.session_state:
     hoy = datetime.now()
     st.session_state.fecha_referencia = (hoy - timedelta(days=hoy.weekday())).date()
 
-# --- 3. SIDEBAR (CORREGIDO FLUJO DE EDICIÓN) ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Configuración")
     dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     dia_edit = st.selectbox("Día a editar:", dias_semana)
     
-    # IMPORTANTE: Cargamos los datos (pueden ser heredados)
     datos_actuales = cargar_semana(st.session_state.fecha_referencia)
     
     provs_input = st.text_area("Proveedores para este día:", 
                                value=", ".join(datos_actuales.get(dia_edit, [])))
 
     if st.button("💾 Guardar Planificación"):
-        # Actualizamos el diccionario con el cambio manual
         datos_actuales[dia_edit] = [p.strip().upper() for p in provs_input.split(",") if p.strip()]
-        # Guardamos FÍSICAMENTE en la base de datos para esta semana
         guardar_calendario(st.session_state.fecha_referencia, datos_actuales)
         st.success(f"Configuración guardada para la semana {st.session_state.fecha_referencia}")
         st.rerun()
@@ -128,7 +124,7 @@ with st.sidebar:
                 conn.close()
                 st.rerun()
 
-# --- 4. ÁREA PRINCIPAL (VISUALIZACIÓN) ---
+# --- 4. ÁREA PRINCIPAL ---
 st.title("📅 Monitor de Órdenes de Compra")
 
 c1, c2, c3 = st.columns([1, 2, 1])
@@ -143,27 +139,21 @@ with c3:
 
 st.subheader(f"Planificación Semana: {st.session_state.fecha_referencia}")
 
-# Cargamos los datos que se van a mostrar (Aplica la herencia automáticamente)
 plan_visual = cargar_semana(st.session_state.fecha_referencia)
-
-# Construir tabla para mostrar (Rellenando vacíos con "-")
 df_visual = pd.DataFrame.from_dict(plan_visual, orient='index').transpose().fillna("-")
-# Usamos dataframe simple para visualización pura
 st.dataframe(df_visual, use_container_width=True, hide_index=True)
 
 st.divider()
 
-# --- 5. MONITOREO ---
+# --- 5. MONITOREO (CORREGIDO ERROR DE STRIP) ---
 st.subheader("🤖 Monitoreo en Tiempo Real")
 dia_hoy_idx = datetime.now().weekday()
 dia_hoy_es = dias_semana[dia_hoy_idx]
-# El monitoreo usa la planificación que estamos viendo en pantalla
 provs_hoy = [p for p in plan_visual.get(dia_hoy_es, []) if p and p != "-"]
 
 if not provs_hoy:
     st.info(f"No hay proveedores programados para hoy ({dia_hoy_es}).")
 else:
-    # Lógica de Excel/GitHub
     url_excel = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/ODC_alerta.xlsx"
     try:
         res = requests.get(url_excel)
@@ -172,13 +162,18 @@ else:
         df_raw = df_raw.rename(columns={'Creado por': 'Comprador'})
         
         df_aut = obtener_compradores_autorizados()
-        df_aut['key'] = df_aut['nombre'].str.upper().strip() + "|" + df_aut['comprador_habitual'].str.upper().strip()
+        
+        # CORRECCIÓN AQUÍ: Uso de .str antes de upper() y strip()
+        df_aut['key'] = (
+            df_aut['nombre'].str.upper().str.strip() + 
+            "|" + 
+            df_aut['comprador_habitual'].str.upper().str.strip()
+        )
         set_aut = set(df_aut['key'].tolist())
 
         def validar(row):
             p_ex = str(row['Proveedor']).upper().strip()
             c_ex = str(row['Comprador']).upper().strip()
-            # Valida contra los proveedores planificados (heredados o explícitos)
             if not any(p in p_ex for p in provs_hoy): return False
             return f"{p_ex}|{c_ex}" in set_aut
 
