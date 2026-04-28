@@ -49,13 +49,6 @@ st.markdown("""
         color: #555;
         margin-top: 10px;
     }
-    .missing-panel {
-        background-color: #f9f9f9;
-        border: 2px solid #e0e0e0;
-        border-radius: 10px;
-        padding: 15px;
-        margin-top: 20px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -90,15 +83,6 @@ def forzar_reset_maestro():
 
 init_db()
 
-def split_prov(s):
-    if not s: return []
-    # Si la cadena contiene '|', separa por barra (nuevo formato)
-    if '|' in s:
-        return [p.strip() for p in s.split('|') if p.strip()]
-    # Si no, formato antiguo con comas (puede contener comas en nombres)
-    # Dividimos por comas y luego limpiamos; esto podría fallar si hay comas en nombres en datos antiguos.
-    return [p.strip() for p in s.split(',') if p.strip()]
-
 def cargar_semana(fecha_consulta):
     conn = sqlite3.connect('calendario.db')
     fecha_str = str(fecha_consulta)
@@ -106,12 +90,14 @@ def cargar_semana(fecha_consulta):
         "SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?",
         conn, params=(fecha_str,)
     )
-    #if not df.empty:
-      #  res = dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
-       # conn.close()
-       # return res
+    def split_prov(s):
+        if not s: return []
+        # Nuevo formato con pipe
+        if '|' in s:
+            return [p.strip() for p in s.split('|') if p.strip()]
+        # Compatibilidad con formato antiguo (coma simple – puede fallar con nombres que tengan coma)
+        return [p.strip() for p in s.split(',') if p.strip()]
 
-    # Aplicar la misma lógica en ambos casos
     if not df.empty:
         res = dict(zip(df['dia_semana'], df['proveedores'].apply(split_prov)))
         conn.close()
@@ -126,7 +112,7 @@ def cargar_semana(fecha_consulta):
             conn, params=(ultima[0],)
         )
         conn.close()
-        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(lambda x: x.split('|') if x else [])))# Aqui
+        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(split_prov)))
 
     conn.close()
     return {d: [] for d in dias_semana}
@@ -135,6 +121,7 @@ def guardar_calendario(fecha, calendario_dict):
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     for dia, lista_provs in calendario_dict.items():
+        # Usamos '|' como separador interno para respetar comas en nombres
         provs_str = "|".join([p.strip().upper() for p in lista_provs if p.strip()])
         cursor.execute(
             "INSERT OR REPLACE INTO calendario_historico (fecha_semana, dia_semana, proveedores) VALUES (?, ?, ?)",
@@ -173,7 +160,6 @@ def obtener_compradores_autorizados():
     return df
 
 def obtener_proveedores_registrados():
-    """Devuelve una lista con los nombres únicos de proveedores registrados en el maestro."""
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT nombre FROM proveedores_maestro ORDER BY nombre")
@@ -197,12 +183,10 @@ with st.sidebar:
     with st.expander("📅 Planificación Semanal", expanded=True):
         dia_edit = st.selectbox("Día a editar:", dias_semana)
         cal_actual = cargar_semana(st.session_state.fecha_referencia)
-        # Obtener proveedores registrados para el dropdown
         provs_registrados = obtener_proveedores_registrados()
         if not provs_registrados:
             st.warning("No hay proveedores registrados aún. Agregue al menos uno en la sección 'Registro Maestro' primero.")
         else:
-            # Proveedores actualmente seleccionados para este día (puede incluir algunos que ya no estén en el maestro)
             seleccion_actual = [p for p in cal_actual.get(dia_edit, []) if p in provs_registrados]
             nuevos_seleccionados = st.multiselect(
                 "Proveedores para este día:",
@@ -321,7 +305,11 @@ else:
         res = requests.get(url)
         df_raw = pd.read_excel(io.BytesIO(res.content))
         df_raw.columns = df_raw.columns.str.strip()
-        df_raw = df_raw.rename(columns={'Creado por': 'Comprador'})
+        # Renombrar columnas clave
+        df_raw = df_raw.rename(columns={
+            'Creado por': 'Comprador',
+            'Sucursal destino': 'SucursalDestino'
+        })
 
         df_aut = obtener_compradores_autorizados()
         if df_aut.empty:
@@ -343,9 +331,8 @@ else:
 
             df_f = df_raw[df_raw.apply(validar, axis=1)].copy()
 
-            # Pares registrados que están planificados para hoy
+            # Pares planificados para hoy (desde el maestro)
             pares_planificados = df_aut[df_aut['nombre'].isin(proveedores_upper)].copy()
-            # Claves de las órdenes activas
             if not df_f.empty:
                 set_activas = set(df_f['Proveedor'].str.upper() + "|" + df_f['Comprador'].str.upper())
             else:
@@ -355,16 +342,16 @@ else:
             pares_faltantes = pares_planificados[~pares_planificados['activo']][['nombre', 'comprador_habitual']]
 
             if not df_f.empty:
-                # Dividir en dos columnas: carrusel y panel de faltantes
                 col_izq, col_der = st.columns([3, 1])
                 with col_izq:
-                    # Carrusel
+                    # Preparar datos para el carrusel (incluimos sucursal destino)
                     ordenes = []
                     for _, row in df_f.iterrows():
                         ordenes.append({
                             'numero': str(row['Número de orden'])[-4:],
                             'proveedor': row['Proveedor'],
-                            'comprador': row['Comprador']
+                            'comprador': row['Comprador'],
+                            'sucursal': row['SucursalDestino']  # <--- nuevo campo
                         })
                     ordenes_json = json.dumps(ordenes)
                     carrusel_html = f"""
@@ -408,6 +395,7 @@ else:
                             <div class="carousel-order-number">#---</div>
                             <div class="carousel-info">Cargando...</div>
                             <div class="carousel-detail">Comprador: ---</div>
+                            <div class="carousel-detail">Sucursal Destino: ---</div>
                         </div>
                     </div>
                     <script>
@@ -417,7 +405,9 @@ else:
                         const order = orders[index];
                         document.querySelector('#carousel-container .carousel-order-number').textContent = '#' + order.numero;
                         document.querySelector('#carousel-container .carousel-info').textContent = order.proveedor;
-                        document.querySelector('#carousel-container .carousel-detail').textContent = 'Comprador: ' + order.comprador;
+                        const details = document.querySelectorAll('#carousel-container .carousel-detail');
+                        details[0].textContent = 'Comprador: ' + order.comprador;
+                        details[1].textContent = 'Sucursal Destino: ' + order.sucursal;
                     }}
                     showOrder(0);
                     setInterval(() => {{
@@ -426,21 +416,20 @@ else:
                     }}, 6000);
                     </script>
                     """
-                    components.html(carrusel_html, height=450)
+                    components.html(carrusel_html, height=480)
                     st.caption(f"🔄 {len(ordenes)} órdenes validadas rotando cada 6 segundos")
 
-                #with col_der:
-                 #  st.markdown("### ⚠️ Sin órdenes")
-                 #  if not pares_faltantes.empty:
-                 #      st.dataframe(
-                 #          pares_faltantes.rename(columns={'nombre': 'Proveedor', 'comprador_habitual': 'Comprador'}),
-                 #          hide_index=True,
-                 #          use_container_width=True
-                 #      )
-                 #  else:
-                 #      st.success("Todos los pares tienen órdenes activas.")
+                with col_der:
+                    st.markdown("### ⚠️ Sin órdenes")
+                    if not pares_faltantes.empty:
+                        st.dataframe(
+                            pares_faltantes.rename(columns={'nombre': 'Proveedor', 'comprador_habitual': 'Comprador'}),
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                    else:
+                        st.success("Todos los pares tienen órdenes activas.")
             else:
-                # No hay órdenes filtradas
                 st.info("Buscando órdenes validadas... (ninguna coincide aún)")
                 with st.expander("🔍 Ver diagnóstico de filtros"):
                     st.write("**Proveedores planificados para hoy:**", proveedores_upper)
