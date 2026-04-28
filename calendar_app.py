@@ -14,8 +14,7 @@ st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 # ------------------------------------------------------------
 # CSS PERSONALIZADO (Cola + Carrusel)
 # ------------------------------------------------------------
-st.markdown(
-    """
+st.markdown("""
 <style>
     .carousel-card {
         background-color: #FFFFFF;
@@ -49,36 +48,8 @@ st.markdown(
         color: #555;
         margin-top: 10px;
     }
-    .main-order-container {
-        background-color: #FFC107;
-        color: black;
-        border-radius: 15px;
-        padding: 30px;
-        text-align: center;
-        border: 5px solid #E67E22;
-        margin-bottom: 20px;
-    }
-    .main-order-title { font-size: 1.8rem; font-weight: bold; }
-    .main-order-number { font-size: 7rem; font-weight: 900; line-height: 1; margin: 10px 0; }
-    .main-order-info { font-size: 1.4rem; font-weight: bold; }
-    
-    .queue-card {
-        background-color: #262730;
-        color: white;
-        border-radius: 10px;
-        padding: 12px;
-        margin-bottom: 10px;
-        border-left: 8px solid #FFC107;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .queue-number { font-size: 1.8rem; font-weight: bold; color: #FFC107; }
-    .queue-details { text-align: right; font-size: 0.85rem; }
 </style>
-""",
-    unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
 
 # ------------------------------------------------------------
 # VARIABLES GLOBALES
@@ -91,25 +62,12 @@ dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", 
 def init_db():
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS proveedores_maestro (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT,
-            comprador_habitual TEXT
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS calendario_historico (
-            id INTEGER PRIMARY KEY,
-            fecha_semana TEXT,
-            dia_semana TEXT,
-            proveedores TEXT
-        )
-    ''')
-    cursor.execute('''
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_fecha_dia 
-        ON calendario_historico (fecha_semana, dia_semana)
-    ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS proveedores_maestro
+                      (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, comprador_habitual TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS calendario_historico
+                      (id INTEGER PRIMARY KEY, fecha_semana TEXT, dia_semana TEXT, proveedores TEXT)''')
+    cursor.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_fecha_dia
+                      ON calendario_historico (fecha_semana, dia_semana)''')
     conn.commit()
     conn.close()
 
@@ -129,8 +87,7 @@ def cargar_semana(fecha_consulta):
     fecha_str = str(fecha_consulta)
     df = pd.read_sql_query(
         "SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?",
-        conn,
-        params=(fecha_str,)
+        conn, params=(fecha_str,)
     )
     if not df.empty:
         res = dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
@@ -138,16 +95,12 @@ def cargar_semana(fecha_consulta):
         return res
 
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT MAX(fecha_semana) FROM calendario_historico WHERE fecha_semana < ?",
-        (fecha_str,)
-    )
+    cursor.execute("SELECT MAX(fecha_semana) FROM calendario_historico WHERE fecha_semana < ?", (fecha_str,))
     ultima = cursor.fetchone()
     if ultima and ultima[0]:
         df_h = pd.read_sql_query(
             "SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?",
-            conn,
-            params=(ultima[0],)
+            conn, params=(ultima[0],)
         )
         conn.close()
         return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(lambda x: x.split(',') if x else [])))
@@ -172,15 +125,9 @@ def registrar_comprador(proveedor, comprador):
     cursor = conn.cursor()
     p_up, c_up = proveedor.strip().upper(), comprador.strip().upper()
     try:
-        cursor.execute(
-            "SELECT 1 FROM proveedores_maestro WHERE nombre = ? AND comprador_habitual = ?",
-            (p_up, c_up)
-        )
+        cursor.execute("SELECT 1 FROM proveedores_maestro WHERE nombre = ? AND comprador_habitual = ?", (p_up, c_up))
         if not cursor.fetchone():
-            cursor.execute(
-                "INSERT INTO proveedores_maestro (nombre, comprador_habitual) VALUES (?, ?)",
-                (p_up, c_up)
-            )
+            cursor.execute("INSERT INTO proveedores_maestro (nombre, comprador_habitual) VALUES (?, ?)", (p_up, c_up))
             conn.commit()
             conn.close()
             return True
@@ -352,39 +299,51 @@ else:
         df_raw = df_raw.rename(columns={'Creado por': 'Comprador'})
 
         df_aut = obtener_compradores_autorizados()
-        df_aut['key'] = (
-            df_aut['nombre'].str.upper().str.strip() + "|" +
-            df_aut['comprador_habitual'].str.upper().str.strip()
-        )
-        set_aut = set(df_aut['key'].tolist())
-
-        def validar(row):
-            p = str(row['Proveedor']).upper().strip()
-            c = str(row['Comprador']).upper().strip()
-            if p not in [prov.upper() for prov in provs_hoy]:
-                return False
-            return f"{p}|{c}" in set_aut
-
-        df_f = df_raw[df_raw.apply(validar, axis=1)].copy()
-
-        if not df_f.empty:
-            ordenes = df_f.to_dict('records')
-            indice = st.session_state.carousel_index % len(ordenes)
-            orden_actual = ordenes[indice]
-
-            st.markdown(f"""
-                <div class="carousel-card">
-                    <div class="carousel-title">ORDEN DE COMPRA ACTIVA</div>
-                    <div class="carousel-order-number">#{str(orden_actual['Número de orden'])[-4:]}</div>
-                    <div class="carousel-info">{orden_actual['Proveedor']}</div>
-                    <div class="carousel-detail">
-                        Comprador: {orden_actual['Comprador']}
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-
-            st.session_state.carousel_index = (indice + 1) % len(ordenes)
+        if df_aut.empty:
+            st.warning("No hay pares Proveedor-Comprador registrados. Agréguelos en el panel lateral.")
         else:
-            st.info("Buscando órdenes validadas... (ninguna coincide aún)")
+            df_aut['key'] = (
+                df_aut['nombre'].str.upper().str.strip() + "|" +
+                df_aut['comprador_habitual'].str.upper().str.strip()
+            )
+            set_aut = set(df_aut['key'].tolist())
+
+            # Convertir proveedores de hoy a una lista limpia en mayúsculas
+            proveedores_upper = [p.strip().upper() for p in provs_hoy]
+
+            def validar(row):
+                p = str(row['Proveedor']).upper().strip()
+                c = str(row['Comprador']).upper().strip()
+                if p not in proveedores_upper:
+                    return False
+                return f"{p}|{c}" in set_aut
+
+            df_f = df_raw[df_raw.apply(validar, axis=1)].copy()
+
+            if not df_f.empty:
+                ordenes = df_f.to_dict('records')
+                indice = st.session_state.carousel_index % len(ordenes)
+                orden_actual = ordenes[indice]
+
+                st.markdown(f"""
+                    <div class="carousel-card">
+                        <div class="carousel-title">ORDEN DE COMPRA ACTIVA</div>
+                        <div class="carousel-order-number">#{str(orden_actual['Número de orden'])[-4:]}</div>
+                        <div class="carousel-info">{orden_actual['Proveedor']}</div>
+                        <div class="carousel-detail">
+                            Comprador: {orden_actual['Comprador']}
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+
+                st.session_state.carousel_index = (indice + 1) % len(ordenes)
+            else:
+                # Diagnóstico cuando no hay coincidencias
+                st.info("Buscando órdenes validadas... (ninguna coincide aún)")
+                with st.expander("🔍 Ver diagnóstico de filtros"):
+                    st.write("**Proveedores planificados para hoy:**", proveedores_upper if proveedores_upper else "Ninguno")
+                    st.write("**Pares Proveedor-Comprador registrados:**")
+                    st.dataframe(df_aut[['nombre', 'comprador_habitual']].rename(columns={'nombre': 'Proveedor', 'comprador_habitual': 'Comprador'}))
+                    st.caption("Asegúrese de que el nombre del proveedor en la planificación sea **exactamente igual** al que aparece en el archivo Excel (respetando comas, puntos, espacios).")
     except Exception as e:
         st.error(f"Error en la sincronización: {e}")
