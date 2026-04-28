@@ -4,7 +4,7 @@ import requests
 import io
 import sqlite3
 from datetime import datetime, timedelta
-from streamlit_autorefresh import st_autorefresh
+import streamlit.components.v1 as components
 
 # ------------------------------------------------------------
 # CONFIGURACIÓN DE PÁGINA
@@ -12,12 +12,11 @@ from streamlit_autorefresh import st_autorefresh
 st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 
 # ------------------------------------------------------------
-# CSS PERSONALIZADO (Cola anterior + nuevo Carrousel)
+# CSS PERSONALIZADO (Cola + Carrusel)
 # ------------------------------------------------------------
 st.markdown(
     """
 <style>
-    /* Estilo del carrusel: fondo blanco, bordes verdes gruesos, sombra 3D */
     .carousel-card {
         background-color: #FFFFFF;
         border: 5px solid #2E7D32;
@@ -50,7 +49,6 @@ st.markdown(
         color: #555;
         margin-top: 10px;
     }
-    /* Opcional: mantener el estilo de cola anterior (por si se necesita más adelante) */
     .main-order-container {
         background-color: #FFC107;
         color: black;
@@ -88,10 +86,9 @@ st.markdown(
 dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
 # ------------------------------------------------------------
-# BASE DE DATOS (SQLite) - Definiciones completas
+# BASE DE DATOS (SQLite)
 # ------------------------------------------------------------
 def init_db():
-    """Crea las tablas necesarias si no existen."""
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     cursor.execute('''
@@ -117,7 +114,6 @@ def init_db():
     conn.close()
 
 def forzar_reset_maestro():
-    """Elimina y recrea la tabla de proveedores maestro."""
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     cursor.execute("DROP TABLE IF EXISTS proveedores_maestro")
@@ -126,14 +122,9 @@ def forzar_reset_maestro():
     st.cache_data.clear()
     init_db()
 
-# Inicializar base de datos al importar el módulo
 init_db()
 
 def cargar_semana(fecha_consulta):
-    """
-    Carga los proveedores de la semana correspondiente a 'fecha_consulta'.
-    Si no existe, hereda los de la semana anterior más reciente.
-    """
     conn = sqlite3.connect('calendario.db')
     fecha_str = str(fecha_consulta)
     df = pd.read_sql_query(
@@ -146,7 +137,6 @@ def cargar_semana(fecha_consulta):
         conn.close()
         return res
 
-    # Herencia: tomar la semana más reciente anterior a la fecha solicitada
     cursor = conn.cursor()
     cursor.execute(
         "SELECT MAX(fecha_semana) FROM calendario_historico WHERE fecha_semana < ?",
@@ -163,11 +153,9 @@ def cargar_semana(fecha_consulta):
         return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(lambda x: x.split(',') if x else [])))
 
     conn.close()
-    # Si no hay ninguna semana anterior, devolver listas vacías
     return {d: [] for d in dias_semana}
 
 def guardar_calendario(fecha, calendario_dict):
-    """Persiste en la BD la planificación de una semana completa."""
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     for dia, lista_provs in calendario_dict.items():
@@ -180,7 +168,6 @@ def guardar_calendario(fecha, calendario_dict):
     conn.close()
 
 def registrar_comprador(proveedor, comprador):
-    """Inserta un proveedor y su comprador habitual. Retorna True si es nuevo."""
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     p_up, c_up = proveedor.strip().upper(), comprador.strip().upper()
@@ -203,7 +190,6 @@ def registrar_comprador(proveedor, comprador):
     return False
 
 def eliminar_comprador(id_registro):
-    """Elimina un registro del maestro de compradores por su ID."""
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     cursor.execute("DELETE FROM proveedores_maestro WHERE id = ?", (id_registro,))
@@ -211,7 +197,6 @@ def eliminar_comprador(id_registro):
     conn.close()
 
 def obtener_compradores_autorizados():
-    """Devuelve un DataFrame con los registros del maestro de compradores."""
     conn = sqlite3.connect('calendario.db')
     df = pd.read_sql_query("SELECT id, nombre, comprador_habitual FROM proveedores_maestro", conn)
     conn.close()
@@ -222,19 +207,17 @@ def obtener_compradores_autorizados():
 # ------------------------------------------------------------
 if 'fecha_referencia' not in st.session_state:
     hoy = datetime.now()
-    # Lunes de la semana actual
     st.session_state.fecha_referencia = (hoy - timedelta(days=hoy.weekday())).date()
 
 if 'carousel_index' not in st.session_state:
     st.session_state.carousel_index = 0
 
 # ------------------------------------------------------------
-# SIDEBAR - Rediseño limpio y ordenado
+# SIDEBAR
 # ------------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Panel de Configuración")
 
-    # --- Sección expandible: Planificación Semanal ---
     with st.expander("📅 Planificación Semanal", expanded=True):
         dia_edit = st.selectbox("Día a editar:", dias_semana)
         cal_actual = cargar_semana(st.session_state.fecha_referencia)
@@ -242,16 +225,12 @@ with st.sidebar:
             "Proveedores (separados por coma):",
             value=", ".join(cal_actual.get(dia_edit, []))
         )
-
         if st.button("💾 Guardar planificación"):
-            cal_actual[dia_edit] = [
-                p.strip().upper() for p in provs_input.split(",") if p.strip()
-            ]
+            cal_actual[dia_edit] = [p.strip().upper() for p in provs_input.split(",") if p.strip()]
             guardar_calendario(st.session_state.fecha_referencia, cal_actual)
             st.success("Planificación actualizada.")
             st.rerun()
 
-    # --- Sección expandible: Registro Maestro de Compradores ---
     with st.expander("👤 Registro Maestro de Compradores"):
         st.caption("Agregar nuevo proveedor y su comprador habitual")
         new_p = st.text_input("Proveedor:", key="np")
@@ -269,7 +248,6 @@ with st.sidebar:
         st.caption("Gestión de registros existentes")
         df_m = obtener_compradores_autorizados()
         if not df_m.empty:
-            # Editor interactivo de la tabla
             edited_m = st.data_editor(
                 df_m,
                 column_config={"id": None},
@@ -289,7 +267,6 @@ with st.sidebar:
                 st.success("Registros actualizados.")
                 st.rerun()
 
-            # Eliminación por ID
             opciones_borrar = {
                 row['id']: f"{row['nombre']} - ({row['comprador_habitual']})"
                 for _, row in df_m.iterrows()
@@ -306,7 +283,6 @@ with st.sidebar:
         else:
             st.info("No hay registros de compradores aún.")
 
-    # --- Sección expandible: Zona de Peligro ---
     with st.expander("⚠️ Zona de Peligro"):
         if st.button("🔄 Reparar tabla de Proveedores (Reset)"):
             forzar_reset_maestro()
@@ -328,7 +304,6 @@ with st.sidebar:
 # ------------------------------------------------------------
 st.title("📅 Monitor de Órdenes de Compra")
 
-# Navegación de semanas
 c1, c2, c3 = st.columns([1, 2, 1])
 with c1:
     if st.button("⬅️ Semana anterior"):
@@ -347,12 +322,21 @@ st.dataframe(df_visual, use_container_width=True, hide_index=True)
 st.divider()
 
 # ------------------------------------------------------------
-# SISTEMA CARRUSEL (Monitoreo en Tiempo Real)
+# SISTEMA CARRUSEL (Rotación automática cada 6 segundos)
 # ------------------------------------------------------------
 st.subheader("🤖 Monitoreo en Tiempo Real")
 
-# Auto-refresco cada 6 segundos
-st_autorefresh(interval=6000, limit=None, key="carousel_refresh")
+# Auto-refresco mediante JavaScript (reemplaza st_autorefresh)
+components.html(
+    """
+    <script>
+    setTimeout(function(){
+        window.location.reload();
+    }, 6000);
+    </script>
+    """,
+    height=0,
+)
 
 dia_hoy_es = dias_semana[datetime.now().weekday()]
 provs_hoy = cal_data.get(dia_hoy_es, [])
@@ -364,11 +348,9 @@ else:
     try:
         res = requests.get(url)
         df_raw = pd.read_excel(io.BytesIO(res.content))
-        # Limpieza de nombres de columnas
         df_raw.columns = df_raw.columns.str.strip()
         df_raw = df_raw.rename(columns={'Creado por': 'Comprador'})
 
-        # Cargar pares autorizados
         df_aut = obtener_compradores_autorizados()
         df_aut['key'] = (
             df_aut['nombre'].str.upper().str.strip() + "|" +
@@ -376,11 +358,9 @@ else:
         )
         set_aut = set(df_aut['key'].tolist())
 
-        # Filtrar órdenes: proveedor está en la lista de hoy & par autorizado
         def validar(row):
             p = str(row['Proveedor']).upper().strip()
             c = str(row['Comprador']).upper().strip()
-            # Proveedor debe estar exactamente en la lista de hoy
             if p not in [prov.upper() for prov in provs_hoy]:
                 return False
             return f"{p}|{c}" in set_aut
@@ -389,11 +369,9 @@ else:
 
         if not df_f.empty:
             ordenes = df_f.to_dict('records')
-            # Avanzar índice del carrusel
             indice = st.session_state.carousel_index % len(ordenes)
             orden_actual = ordenes[indice]
 
-            # Mostrar tarjeta de carrusel grande
             st.markdown(f"""
                 <div class="carousel-card">
                     <div class="carousel-title">ORDEN DE COMPRA ACTIVA</div>
@@ -405,7 +383,6 @@ else:
                 </div>
             """, unsafe_allow_html=True)
 
-            # Preparar el siguiente índice
             st.session_state.carousel_index = (indice + 1) % len(ordenes)
         else:
             st.info("Buscando órdenes validadas... (ninguna coincide aún)")
