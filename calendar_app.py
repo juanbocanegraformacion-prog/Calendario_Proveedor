@@ -111,7 +111,7 @@ def cargar_semana(fecha_consulta):
             conn, params=(ultima[0],)
         )
         conn.close()
-        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(lambda x: x.split(',') if x else [])))
+        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(lambda x: x.split('/') if x else [])))
 
     conn.close()
     return {d: [] for d in dias_semana}
