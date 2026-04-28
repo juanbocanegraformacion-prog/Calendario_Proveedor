@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import io
 import sqlite3
+import json
 from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 
@@ -12,7 +13,7 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 
 # ------------------------------------------------------------
-# CSS PERSONALIZADO (Cola + Carrusel)
+# CSS PERSONALIZADO
 # ------------------------------------------------------------
 st.markdown("""
 <style>
@@ -24,7 +25,7 @@ st.markdown("""
         padding: 40px;
         text-align: center;
         margin: 20px auto;
-        width: 70%;
+        width: 100%;
     }
     .carousel-title {
         font-size: 2rem;
@@ -47,6 +48,13 @@ st.markdown("""
         font-size: 1.5rem;
         color: #555;
         margin-top: 10px;
+    }
+    .missing-panel {
+        background-color: #f9f9f9;
+        border: 2px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 15px;
+        margin-top: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -149,15 +157,21 @@ def obtener_compradores_autorizados():
     conn.close()
     return df
 
+def obtener_proveedores_registrados():
+    """Devuelve una lista con los nombres únicos de proveedores registrados en el maestro."""
+    conn = sqlite3.connect('calendario.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT nombre FROM proveedores_maestro ORDER BY nombre")
+    provs = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return provs
+
 # ------------------------------------------------------------
 # GESTIÓN DE FECHAS (sesión)
 # ------------------------------------------------------------
 if 'fecha_referencia' not in st.session_state:
     hoy = datetime.now()
     st.session_state.fecha_referencia = (hoy - timedelta(days=hoy.weekday())).date()
-
-if 'carousel_index' not in st.session_state:
-    st.session_state.carousel_index = 0
 
 # ------------------------------------------------------------
 # SIDEBAR
@@ -168,15 +182,23 @@ with st.sidebar:
     with st.expander("📅 Planificación Semanal", expanded=True):
         dia_edit = st.selectbox("Día a editar:", dias_semana)
         cal_actual = cargar_semana(st.session_state.fecha_referencia)
-        provs_input = st.text_area(
-            "Proveedores (separados por coma):",
-            value=", ".join(cal_actual.get(dia_edit, []))
-        )
-        if st.button("💾 Guardar planificación"):
-            cal_actual[dia_edit] = [p.strip().upper() for p in provs_input.split(",") if p.strip()]
-            guardar_calendario(st.session_state.fecha_referencia, cal_actual)
-            st.success("Planificación actualizada.")
-            st.rerun()
+        # Obtener proveedores registrados para el dropdown
+        provs_registrados = obtener_proveedores_registrados()
+        if not provs_registrados:
+            st.warning("No hay proveedores registrados aún. Agregue al menos uno en la sección 'Registro Maestro' primero.")
+        else:
+            # Proveedores actualmente seleccionados para este día (puede incluir algunos que ya no estén en el maestro)
+            seleccion_actual = [p for p in cal_actual.get(dia_edit, []) if p in provs_registrados]
+            nuevos_seleccionados = st.multiselect(
+                "Proveedores para este día:",
+                options=provs_registrados,
+                default=seleccion_actual
+            )
+            if st.button("💾 Guardar planificación"):
+                cal_actual[dia_edit] = [p.strip().upper() for p in nuevos_seleccionados]
+                guardar_calendario(st.session_state.fecha_referencia, cal_actual)
+                st.success("Planificación actualizada.")
+                st.rerun()
 
     with st.expander("👤 Registro Maestro de Compradores"):
         st.caption("Agregar nuevo proveedor y su comprador habitual")
@@ -269,7 +291,7 @@ st.dataframe(df_visual, use_container_width=True, hide_index=True)
 st.divider()
 
 # ------------------------------------------------------------
-# SISTEMA CARRUSEL (Rotación automática SOLO del carrusel)
+# SISTEMA CARRUSEL + PANEL DE FALTANTES
 # ------------------------------------------------------------
 st.subheader("🤖 Monitoreo en Tiempo Real")
 
@@ -295,7 +317,6 @@ else:
                 df_aut['comprador_habitual'].str.upper().str.strip()
             )
             set_aut = set(df_aut['key'].tolist())
-
             proveedores_upper = [p.strip().upper() for p in provs_hoy]
 
             def validar(row):
@@ -307,89 +328,116 @@ else:
 
             df_f = df_raw[df_raw.apply(validar, axis=1)].copy()
 
+            # Pares registrados que están planificados para hoy
+            pares_planificados = df_aut[df_aut['nombre'].isin(proveedores_upper)].copy()
+            # Claves de las órdenes activas
             if not df_f.empty:
-                # Convertir órdenes a un array de diccionarios simples para JSON
-                ordenes = []
-                for _, row in df_f.iterrows():
-                    ordenes.append({
-                        'numero': str(row['Número de orden'])[-4:],
-                        'proveedor': row['Proveedor'],
-                        'comprador': row['Comprador']
-                    })
-                
-                # Crear componente HTML/JS que rota sin refrescar la página
-                import json
-                ordenes_json = json.dumps(ordenes)
-                
-                carrusel_html = f"""
-                <style>
-                .carousel-card {{
-                    background-color: #FFFFFF;
-                    border: 5px solid #2E7D32;
-                    border-radius: 20px;
-                    box-shadow: 0 8px 16px rgba(0,0,0,0.25), 0 12px 40px rgba(0,0,0,0.15);
-                    padding: 40px;
-                    text-align: center;
-                    margin: 20px auto;
-                    width: 70%;
-                }}
-                .carousel-title {{
-                    font-size: 2rem;
-                    font-weight: bold;
-                    color: #2E7D32;
-                    margin-bottom: 15px;
-                }}
-                .carousel-order-number {{
-                    font-size: 8rem;
-                    font-weight: 900;
-                    color: #1B5E20;
-                    line-height: 1;
-                }}
-                .carousel-info {{
-                    font-size: 2rem;
-                    font-weight: bold;
-                    color: #333;
-                }}
-                .carousel-detail {{
-                    font-size: 1.5rem;
-                    color: #555;
-                    margin-top: 10px;
-                }}
-                </style>
-                <div id="carousel-container">
-                    <div class="carousel-card">
-                        <div class="carousel-title">ORDEN DE COMPRA ACTIVA</div>
-                        <div class="carousel-order-number">#---</div>
-                        <div class="carousel-info">Cargando...</div>
-                        <div class="carousel-detail">Comprador: ---</div>
-                    </div>
-                </div>
-                <script>
-                const orders = {ordenes_json};
-                let currentIndex = 0;
-                function showOrder(index) {{
-                    const order = orders[index];
-                    document.querySelector('#carousel-container .carousel-order-number').textContent = '#' + order.numero;
-                    document.querySelector('#carousel-container .carousel-info').textContent = order.proveedor;
-                    document.querySelector('#carousel-container .carousel-detail').textContent = 'Comprador: ' + order.comprador;
-                }}
-                showOrder(0);
-                setInterval(() => {{
-                    currentIndex = (currentIndex + 1) % orders.length;
-                    showOrder(currentIndex);
-                }}, 6000);
-                </script>
-                """
-                components.html(carrusel_html, height=450)
-                
-                # También mostramos la cantidad de órdenes encontradas
-                st.caption(f"🔄 {len(ordenes)} órdenes validadas rotando cada 6 segundos")
+                set_activas = set(df_f['Proveedor'].str.upper() + "|" + df_f['Comprador'].str.upper())
             else:
+                set_activas = set()
+
+            pares_planificados['activo'] = pares_planificados['key'].isin(set_activas)
+            pares_faltantes = pares_planificados[~pares_planificados['activo']][['nombre', 'comprador_habitual']]
+
+            if not df_f.empty:
+                # Dividir en dos columnas: carrusel y panel de faltantes
+                col_izq, col_der = st.columns([3, 1])
+                with col_izq:
+                    # Carrusel
+                    ordenes = []
+                    for _, row in df_f.iterrows():
+                        ordenes.append({
+                            'numero': str(row['Número de orden'])[-4:],
+                            'proveedor': row['Proveedor'],
+                            'comprador': row['Comprador']
+                        })
+                    ordenes_json = json.dumps(ordenes)
+                    carrusel_html = f"""
+                    <style>
+                    .carousel-card {{
+                        background-color: #FFFFFF;
+                        border: 5px solid #2E7D32;
+                        border-radius: 20px;
+                        box-shadow: 0 8px 16px rgba(0,0,0,0.25), 0 12px 40px rgba(0,0,0,0.15);
+                        padding: 40px;
+                        text-align: center;
+                        margin: 20px auto;
+                        width: 100%;
+                    }}
+                    .carousel-title {{
+                        font-size: 2rem;
+                        font-weight: bold;
+                        color: #2E7D32;
+                        margin-bottom: 15px;
+                    }}
+                    .carousel-order-number {{
+                        font-size: 8rem;
+                        font-weight: 900;
+                        color: #1B5E20;
+                        line-height: 1;
+                    }}
+                    .carousel-info {{
+                        font-size: 2rem;
+                        font-weight: bold;
+                        color: #333;
+                    }}
+                    .carousel-detail {{
+                        font-size: 1.5rem;
+                        color: #555;
+                        margin-top: 10px;
+                    }}
+                    </style>
+                    <div id="carousel-container">
+                        <div class="carousel-card">
+                            <div class="carousel-title">ORDEN DE COMPRA ACTIVA</div>
+                            <div class="carousel-order-number">#---</div>
+                            <div class="carousel-info">Cargando...</div>
+                            <div class="carousel-detail">Comprador: ---</div>
+                        </div>
+                    </div>
+                    <script>
+                    const orders = {ordenes_json};
+                    let currentIndex = 0;
+                    function showOrder(index) {{
+                        const order = orders[index];
+                        document.querySelector('#carousel-container .carousel-order-number').textContent = '#' + order.numero;
+                        document.querySelector('#carousel-container .carousel-info').textContent = order.proveedor;
+                        document.querySelector('#carousel-container .carousel-detail').textContent = 'Comprador: ' + order.comprador;
+                    }}
+                    showOrder(0);
+                    setInterval(() => {{
+                        currentIndex = (currentIndex + 1) % orders.length;
+                        showOrder(currentIndex);
+                    }}, 6000);
+                    </script>
+                    """
+                    components.html(carrusel_html, height=450)
+                    st.caption(f"🔄 {len(ordenes)} órdenes validadas rotando cada 6 segundos")
+
+                with col_der:
+                    st.markdown("### ⚠️ Sin órdenes")
+                    if not pares_faltantes.empty:
+                        st.dataframe(
+                            pares_faltantes.rename(columns={'nombre': 'Proveedor', 'comprador_habitual': 'Comprador'}),
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                    else:
+                        st.success("Todos los pares tienen órdenes activas.")
+            else:
+                # No hay órdenes filtradas
                 st.info("Buscando órdenes validadas... (ninguna coincide aún)")
                 with st.expander("🔍 Ver diagnóstico de filtros"):
-                    st.write("**Proveedores planificados para hoy:**", proveedores_upper if proveedores_upper else "Ninguno")
+                    st.write("**Proveedores planificados para hoy:**", proveedores_upper)
                     st.write("**Pares Proveedor-Comprador registrados:**")
                     st.dataframe(df_aut[['nombre', 'comprador_habitual']].rename(columns={'nombre': 'Proveedor', 'comprador_habitual': 'Comprador'}))
                     st.caption("Asegúrese de que el nombre del proveedor en la planificación sea **exactamente igual** al que aparece en el archivo Excel (respetando comas, puntos, espacios).")
+                if not pares_faltantes.empty:
+                    st.markdown("---")
+                    st.subheader("⚠️ Pares planificados sin órdenes")
+                    st.dataframe(
+                        pares_faltantes.rename(columns={'nombre': 'Proveedor', 'comprador_habitual': 'Comprador'}),
+                        hide_index=True
+                    )
     except Exception as e:
         st.error(f"Error en la sincronización: {e}")
