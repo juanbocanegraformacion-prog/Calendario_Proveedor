@@ -98,7 +98,7 @@ def cargar_semana(fecha_consulta):
         conn, params=(fecha_str,)
     )
     if not df.empty:
-        res = dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
+        res = dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split('/') if x else [])))
         conn.close()
         return res
 
