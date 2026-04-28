@@ -92,7 +92,14 @@ def registrar_comprador(proveedor, comprador):
     except sqlite3.IntegrityError:
         conn.close()
         return False
-    
+
+def eliminar_comprador(id_registro):
+    conn = sqlite3.connect('calendario.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM proveedores_maestro WHERE id = ?", (id_registro,))
+    conn.commit()
+    conn.close()
+        
 def guardar_calendario(fecha, calendario_dict):
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
