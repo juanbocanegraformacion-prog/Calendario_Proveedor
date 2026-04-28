@@ -84,6 +84,28 @@ def forzar_reset_maestro():
     init_db()
 
 init_db()
+# ------------------------------------------------------------
+# AUTENTICACIÓN POR CONTRASEÑA
+# ------------------------------------------------------------
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
+
+if not st.session_state.autenticado:
+    st.title("Inicio de sesión requerido")
+    with st.form("login_form"):
+        password = st.text_input("Contraseña", type="password")
+        submitted = st.form_submit_button("Acceder")
+        if submitted:
+            # ---- CAMBIA ESTA CONTRASEÑA POR LA QUE DESEES ----
+            if password == "RioMarket2026":
+                st.session_state.autenticado = True
+                st.rerun()  # Recarga para mostrar la app
+            else:
+                st.error("Contraseña incorrecta")
+    st.stop()  # Detiene la ejecución del resto del código
+
+# Si llega aquí, está autenticado → se carga la app normalmente
+# (El resto de tu código sigue aquí, sin necesidad de más cambios)
 
 def cargar_semana(fecha_consulta):
     conn = sqlite3.connect('calendario.db')
