@@ -90,6 +90,15 @@ def forzar_reset_maestro():
 
 init_db()
 
+def split_prov(s):
+    if not s: return []
+    # Si la cadena contiene '|', separa por barra (nuevo formato)
+    if '|' in s:
+        return [p.strip() for p in s.split('|') if p.strip()]
+    # Si no, formato antiguo con comas (puede contener comas en nombres)
+    # Dividimos por comas y luego limpiamos; esto podría fallar si hay comas en nombres en datos antiguos.
+    return [p.strip() for p in s.split(',') if p.strip()]
+
 def cargar_semana(fecha_consulta):
     conn = sqlite3.connect('calendario.db')
     fecha_str = str(fecha_consulta)
@@ -97,10 +106,16 @@ def cargar_semana(fecha_consulta):
         "SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?",
         conn, params=(fecha_str,)
     )
+    #if not df.empty:
+      #  res = dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split(',') if x else [])))
+       # conn.close()
+       # return res
+
+    # Aplicar la misma lógica en ambos casos
     if not df.empty:
-        res = dict(zip(df['dia_semana'], df['proveedores'].apply(lambda x: x.split('/') if x else [])))
-        conn.close()
-        return res
+    res = dict(zip(df['dia_semana'], df['proveedores'].apply(split_prov)))
+    conn.close()
+    return res
 
     cursor = conn.cursor()
     cursor.execute("SELECT MAX(fecha_semana) FROM calendario_historico WHERE fecha_semana < ?", (fecha_str,))
@@ -111,7 +126,7 @@ def cargar_semana(fecha_consulta):
             conn, params=(ultima[0],)
         )
         conn.close()
-        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(lambda x: x.split('/') if x else [])))
+        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(lambda x: x.split(',') if x else [])))
 
     conn.close()
     return {d: [] for d in dias_semana}
@@ -120,7 +135,7 @@ def guardar_calendario(fecha, calendario_dict):
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     for dia, lista_provs in calendario_dict.items():
-        provs_str = ",".join([p.strip().upper() for p in lista_provs if p.strip()])
+        provs_str = "|".join([p.strip().upper() for p in lista_provs if p.strip()])
         cursor.execute(
             "INSERT OR REPLACE INTO calendario_historico (fecha_semana, dia_semana, proveedores) VALUES (?, ?, ?)",
             (str(fecha), dia, provs_str)
