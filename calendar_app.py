@@ -78,6 +78,21 @@ def cargar_semana(fecha_consulta):
     conn.close()
     return {d: [] for d in dias_semana}
 
+def registrar_comprador(proveedor, comprador):
+    conn = sqlite3.connect('calendario.db')
+    cursor = conn.cursor()
+    p_up, c_up = proveedor.strip().upper(), comprador.strip().upper()
+    try:
+        cursor.execute("SELECT 1 FROM proveedores_maestro WHERE nombre = ? AND comprador_habitual = ?", (p_up, c_up))
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO proveedores_maestro (nombre, comprador_habitual) VALUES (?, ?)", (p_up, c_up))
+            conn.commit()
+        conn.close()
+        return True
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False
+    
 def guardar_calendario(fecha, calendario_dict):
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
@@ -247,9 +262,9 @@ else:
         st.error(f"Error en la sincronización: {e}")
     ultima = cursor.fetchone()
     if ultima and ultima[0]:
-        df_h = pd.read_sql_query("SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?", conn, params=(ultima[0],))
+        df_h = pd.read_sql_query("SELECT dia_semana, proveedores_maestro FROM calendario_historico WHERE fecha_semana = ?", conn, params=(ultima[0],))
         conn.close()
-        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(lambda x: x.split(',') if x else [])))
+        return dict(zip(df_h['dia_semana'], df_h['proveedores_maestro'].apply(lambda x: x.split(',') if x else [])))
     
     conn.close()
     return {d: [] for d in dias_semana}
@@ -259,7 +274,7 @@ def guardar_calendario(fecha, calendario_dict):
     cursor = conn.cursor()
     for dia, lista_provs in calendario_dict.items():
         provs_str = ",".join([p.strip().upper() for p in lista_provs if p.strip()])
-        cursor.execute("INSERT OR REPLACE INTO calendario_historico (fecha_semana, dia_semana, proveedores) VALUES (?, ?, ?)", (str(fecha), dia, provs_str))
+        cursor.execute("INSERT OR REPLACE INTO calendario_historico (fecha_semana, dia_semana, proveedores_maestro) VALUES (?, ?, ?)", (str(fecha), dia, provs_str))
     conn.commit()
     conn.close()
 
