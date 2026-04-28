@@ -126,7 +126,7 @@ def cargar_semana(fecha_consulta):
             conn, params=(ultima[0],)
         )
         conn.close()
-        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(lambda x: x.split(',') if x else [])))
+        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(lambda x: x.split('|') if x else [])))# Aqui
 
     conn.close()
     return {d: [] for d in dias_semana}
@@ -429,16 +429,16 @@ else:
                     components.html(carrusel_html, height=450)
                     st.caption(f"🔄 {len(ordenes)} órdenes validadas rotando cada 6 segundos")
 
-                with col_der:
-                    st.markdown("### ⚠️ Sin órdenes")
-                    if not pares_faltantes.empty:
-                        st.dataframe(
-                            pares_faltantes.rename(columns={'nombre': 'Proveedor', 'comprador_habitual': 'Comprador'}),
-                            hide_index=True,
-                            use_container_width=True
-                        )
-                    else:
-                        st.success("Todos los pares tienen órdenes activas.")
+                #with col_der:
+                 #  st.markdown("### ⚠️ Sin órdenes")
+                 #  if not pares_faltantes.empty:
+                 #      st.dataframe(
+                 #          pares_faltantes.rename(columns={'nombre': 'Proveedor', 'comprador_habitual': 'Comprador'}),
+                 #          hide_index=True,
+                 #          use_container_width=True
+                 #      )
+                 #  else:
+                 #      st.success("Todos los pares tienen órdenes activas.")
             else:
                 # No hay órdenes filtradas
                 st.info("Buscando órdenes validadas... (ninguna coincide aún)")
