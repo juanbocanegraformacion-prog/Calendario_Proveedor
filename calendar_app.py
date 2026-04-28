@@ -273,17 +273,8 @@ st.divider()
 # ------------------------------------------------------------
 st.subheader("🤖 Monitoreo en Tiempo Real")
 
-# Auto-refresco mediante JavaScript (reemplaza st_autorefresh)
-components.html(
-    """
-    <script>
-    setTimeout(function(){
-        window.location.reload();
-    }, 3000);
-    </script>
-    """,
-    height=0,
-)
+# Refresco automático de la página cada 5 segundos
+st.markdown('<meta http-equiv="refresh" content="5">', unsafe_allow_html=True)
 
 dia_hoy_es = dias_semana[datetime.now().weekday()]
 provs_hoy = cal_data.get(dia_hoy_es, [])
