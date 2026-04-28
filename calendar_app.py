@@ -187,7 +187,7 @@ with st.sidebar:
         cal_actual = cargar_semana(st.session_state.fecha_referencia)
         provs_registrados = obtener_proveedores_registrados()
         if not provs_registrados:
-            st.warning("No hay proveedores registrados aún. Agregue al menos uno en la sección 'Registro Maestro' primero.")
+            st.warning("No hay proveedores registrados aún. Agregue al menos uno en la sección 'Registro Compradores' primero.")
         else:
             seleccion_actual = [p for p in cal_actual.get(dia_edit, []) if p in provs_registrados]
             nuevos_seleccionados = st.multiselect(
@@ -201,8 +201,8 @@ with st.sidebar:
                 st.success("Planificación actualizada.")
                 st.rerun()
 
-    with st.expander("👤 Registro Maestro de Compradores"):
-        st.caption("Agregar nuevo proveedor y su comprador habitual")
+    with st.expander("👤 Registro Compradores"):
+        st.caption("Agregar proveedor y comprador")
         new_p = st.text_input("Proveedor:", key="np")
         new_c = st.text_input("Comprador asignado:", key="nc")
         if st.button("➕ Registrar nuevo par"):
@@ -210,7 +210,7 @@ with st.sidebar:
                 if registrar_comprador(new_p, new_c):
                     st.success(f"Registrado: {new_p.upper()} → {new_c.upper()}")
                 else:
-                    st.warning("Ese par ya existe.")
+                    st.warning("Ese Registro ya existe.")
                 st.rerun()
             else:
                 st.error("Complete ambos campos.")
@@ -225,7 +225,7 @@ with st.sidebar:
                 use_container_width=True,
                 key="editor_compradores"
             )
-            if st.button("🔄 Aplicar cambios de la tabla"):
+            if st.button("🔄 Aplicar cambios"):
                 conn = sqlite3.connect('calendario.db')
                 for _, row in edited_m.iterrows():
                     conn.execute(
@@ -254,27 +254,27 @@ with st.sidebar:
             st.info("No hay registros de compradores aún.")
 
     # Zona de Peligro con comentarios explicativos
-    with st.expander("⚠️ Zona de Peligro"):
-        # Botón para reiniciar únicamente la tabla de proveedores maestro
-        if st.button("🔄 Reparar tabla de Proveedores (Reset)"):
-            # Elimina y recrea la tabla proveedores_maestro, conserva el calendario histórico
-            forzar_reset_maestro()
-            st.warning("Tabla de proveedores reiniciada.")
-            st.rerun()
-
-        # Botón para eliminar completamente la base de datos y volver a crearla vacía
-        if st.button("💣 REINICIAR TODA LA BASE DE DATOS"):
-            conn = sqlite3.connect('calendario.db')
-            cursor = conn.cursor()
-            # Se borran ambas tablas
-            cursor.execute("DROP TABLE IF EXISTS proveedores_maestro")
-            cursor.execute("DROP TABLE IF EXISTS calendario_historico")
-            conn.commit()
-            conn.close()
-            # Se vuelven a crear las tablas vacías
-            init_db()
-            st.warning("Base de datos completamente borrada y recreada.")
-            st.rerun()
+    #with st.expander("⚠️ Zona de Peligro"):
+    #    # Botón para reiniciar únicamente la tabla de proveedores maestro
+    #    if st.button("🔄 Reparar tabla de Proveedores (Reset)"):
+    #        # Elimina y recrea la tabla proveedores_maestro, conserva el calendario histórico
+    #        forzar_reset_maestro()
+    #        st.warning("Tabla de proveedores reiniciada.")
+    #        st.rerun()
+    #
+    #    # Botón para eliminar completamente la base de datos y volver a crearla vacía
+    #    if st.button("💣 REINICIAR TODA LA BASE DE DATOS"):
+    #        conn = sqlite3.connect('calendario.db')
+    #        cursor = conn.cursor()
+    #        # Se borran ambas tablas
+    #        cursor.execute("DROP TABLE IF EXISTS proveedores_maestro")
+    #        cursor.execute("DROP TABLE IF EXISTS calendario_historico")
+    #        conn.commit()
+    #        conn.close()
+    #        # Se vuelven a crear las tablas vacías
+    #        init_db()
+    #        st.warning("Base de datos completamente borrada y recreada.")
+    #        st.rerun()
 
 # ------------------------------------------------------------
 # ÁREA PRINCIPAL
@@ -397,7 +397,7 @@ else:
                 </style>
                 <div id="carousel-container">
                     <div class="carousel-card">
-                        <div class="carousel-title">ORDEN DE COMPRA ACTIVA</div>
+                        <div class="carousel-title">ORDEN DE COMPRA</div>
                         <div class="carousel-order-number">#---</div>
                         <div class="carousel-info">---</div>
                         <div class="carousel-detail">Comprador: ---</div>
