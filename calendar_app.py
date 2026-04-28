@@ -54,6 +54,14 @@ def init_db():
     cursor.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_fecha_dia ON calendario_historico (fecha_semana, dia_semana)''')
     conn.commit()
     conn.close()
+    
+def forzar_reset_maestro():
+    conn = sqlite3.connect('calendario.db')
+    cursor = conn.cursor()
+    cursor.execute("DROP TABLE IF EXISTS proveedores_maestro")
+    conn.commit()
+    conn.close()
+    st.cache_data.clear()
 
 init_db()
 
@@ -99,7 +107,7 @@ def eliminar_comprador(id_registro):
     cursor.execute("DELETE FROM proveedores_maestro WHERE id = ?", (id_registro,))
     conn.commit()
     conn.close()
-        
+
 def guardar_calendario(fecha, calendario_dict):
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
