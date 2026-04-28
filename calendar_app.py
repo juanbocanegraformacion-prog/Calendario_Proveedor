@@ -113,9 +113,9 @@ def cargar_semana(fecha_consulta):
 
     # Aplicar la misma lógica en ambos casos
     if not df.empty:
-    res = dict(zip(df['dia_semana'], df['proveedores'].apply(split_prov)))
-    conn.close()
-    return res
+        res = dict(zip(df['dia_semana'], df['proveedores'].apply(split_prov)))
+        conn.close()
+        return res
 
     cursor = conn.cursor()
     cursor.execute("SELECT MAX(fecha_semana) FROM calendario_historico WHERE fecha_semana < ?", (fecha_str,))
