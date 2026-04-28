@@ -269,21 +269,9 @@ st.dataframe(df_visual, use_container_width=True, hide_index=True)
 st.divider()
 
 # ------------------------------------------------------------
-# SISTEMA CARRUSEL (Rotación automática cada 6 segundos)
+# SISTEMA CARRUSEL (Rotación automática SOLO del carrusel)
 # ------------------------------------------------------------
 st.subheader("🤖 Monitoreo en Tiempo Real")
-
-# Auto-refresco mediante JavaScript (reemplaza st_autorefresh)
-components.html(
-    """
-    <script>
-    setTimeout(function(){
-        window.location.reload();
-    }, 6000);
-    </script>
-    """,
-    height=0,
-)
 
 dia_hoy_es = dias_semana[datetime.now().weekday()]
 provs_hoy = cal_data.get(dia_hoy_es, [])
@@ -308,7 +296,6 @@ else:
             )
             set_aut = set(df_aut['key'].tolist())
 
-            # Convertir proveedores de hoy a una lista limpia en mayúsculas
             proveedores_upper = [p.strip().upper() for p in provs_hoy]
 
             def validar(row):
@@ -321,24 +308,83 @@ else:
             df_f = df_raw[df_raw.apply(validar, axis=1)].copy()
 
             if not df_f.empty:
-                ordenes = df_f.to_dict('records')
-                indice = st.session_state.carousel_index % len(ordenes)
-                orden_actual = ordenes[indice]
-
-                st.markdown(f"""
+                # Convertir órdenes a un array de diccionarios simples para JSON
+                ordenes = []
+                for _, row in df_f.iterrows():
+                    ordenes.append({
+                        'numero': str(row['Número de orden'])[-4:],
+                        'proveedor': row['Proveedor'],
+                        'comprador': row['Comprador']
+                    })
+                
+                # Crear componente HTML/JS que rota sin refrescar la página
+                import json
+                ordenes_json = json.dumps(ordenes)
+                
+                carrusel_html = f"""
+                <style>
+                .carousel-card {{
+                    background-color: #FFFFFF;
+                    border: 5px solid #2E7D32;
+                    border-radius: 20px;
+                    box-shadow: 0 8px 16px rgba(0,0,0,0.25), 0 12px 40px rgba(0,0,0,0.15);
+                    padding: 40px;
+                    text-align: center;
+                    margin: 20px auto;
+                    width: 70%;
+                }}
+                .carousel-title {{
+                    font-size: 2rem;
+                    font-weight: bold;
+                    color: #2E7D32;
+                    margin-bottom: 15px;
+                }}
+                .carousel-order-number {{
+                    font-size: 8rem;
+                    font-weight: 900;
+                    color: #1B5E20;
+                    line-height: 1;
+                }}
+                .carousel-info {{
+                    font-size: 2rem;
+                    font-weight: bold;
+                    color: #333;
+                }}
+                .carousel-detail {{
+                    font-size: 1.5rem;
+                    color: #555;
+                    margin-top: 10px;
+                }}
+                </style>
+                <div id="carousel-container">
                     <div class="carousel-card">
                         <div class="carousel-title">ORDEN DE COMPRA ACTIVA</div>
-                        <div class="carousel-order-number">#{str(orden_actual['Número de orden'])[-4:]}</div>
-                        <div class="carousel-info">{orden_actual['Proveedor']}</div>
-                        <div class="carousel-detail">
-                            Comprador: {orden_actual['Comprador']}
-                        </div>
+                        <div class="carousel-order-number">#---</div>
+                        <div class="carousel-info">Cargando...</div>
+                        <div class="carousel-detail">Comprador: ---</div>
                     </div>
-                """, unsafe_allow_html=True)
-
-                st.session_state.carousel_index = (indice + 1) % len(ordenes)
+                </div>
+                <script>
+                const orders = {ordenes_json};
+                let currentIndex = 0;
+                function showOrder(index) {{
+                    const order = orders[index];
+                    document.querySelector('#carousel-container .carousel-order-number').textContent = '#' + order.numero;
+                    document.querySelector('#carousel-container .carousel-info').textContent = order.proveedor;
+                    document.querySelector('#carousel-container .carousel-detail').textContent = 'Comprador: ' + order.comprador;
+                }}
+                showOrder(0);
+                setInterval(() => {{
+                    currentIndex = (currentIndex + 1) % orders.length;
+                    showOrder(currentIndex);
+                }}, 6000);
+                </script>
+                """
+                components.html(carrusel_html, height=450)
+                
+                # También mostramos la cantidad de órdenes encontradas
+                st.caption(f"🔄 {len(ordenes)} órdenes validadas rotando cada 6 segundos")
             else:
-                # Diagnóstico cuando no hay coincidencias
                 st.info("Buscando órdenes validadas... (ninguna coincide aún)")
                 with st.expander("🔍 Ver diagnóstico de filtros"):
                     st.write("**Proveedores planificados para hoy:**", proveedores_upper if proveedores_upper else "Ninguno")
