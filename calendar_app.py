@@ -253,16 +253,16 @@ else:
 
         if not df_f.empty:
             ordenes = df_f.to_dict('records')
-            ultima = ordenes[-1]
+            ultima_orden = ordenes[-1]
             anteriores = ordenes[:-1][::-1]
 
             col_l, col_r = st.columns([2, 1])
             with col_l:
                 st.markdown(f"""<div class="main-order-container">
                     <div class="main-order-title">TURNO ACTUAL</div>
-                    <div class="main-order-number">{str(ultima['Número de orden'])[-4:]}</div>
-                    <div class="main-order-info">{ultima['Proveedor']}</div>
-                    <div style="color: #333;">Comprador: {ultima['Comprador']}</div>
+                    <div class="main-order-number">{str(ultima_orden['Número de orden'])[-4:]}</div>
+                    <div class="main-order-info">{ultima_orden['Proveedor']}</div>
+                    <div style="color: #333;">Comprador: {ultima_orden['Comprador']}</div>
                 </div>""", unsafe_allow_html=True)
             with col_r:
                 st.markdown("<h4 style='text-align: center;'>EN ESPERA</h4>", unsafe_allow_html=True)
@@ -275,14 +275,6 @@ else:
             st.info("Buscando órdenes validadas...")
     except Exception as e:
         st.error(f"Error en la sincronización: {e}")
-    ultima = cursor.fetchone()
-    if ultima and ultima[0]:
-        df_h = pd.read_sql_query("SELECT dia_semana, proveedores_maestro FROM calendario_historico WHERE fecha_semana = ?", conn, params=(ultima[0],))
-        conn.close()
-        return dict(zip(df_h['dia_semana'], df_h['proveedores_maestro'].apply(lambda x: x.split(',') if x else [])))
-    
-    conn.close()
-    return {d: [] for d in dias_semana}
 
 def guardar_calendario(fecha, calendario_dict):
     conn = sqlite3.connect('calendario.db')
