@@ -98,23 +98,28 @@ if 'fecha_referencia' not in st.session_state:
     hoy = datetime.now()
     st.session_state.fecha_referencia = (hoy - timedelta(days=hoy.weekday())).date()
 
-# --- 3. SIDEBAR ---
+# --- 3. SIDEBAR (Organizado sin duplicados) ---
+
 with st.sidebar:
     st.header("⚙️ Panel de Configuración")
     
     with st.expander("🛠️ Herramientas de Sistema"):
         if st.button("Reparar Base de Datos"):
-            forzar_reset_maestro()
-            st.success("Tabla reseteada.")
-            st.rerun()
+            # Asegúrate de tener definida la función forzar_reset_maestro()
+            try:
+                forzar_reset_maestro() 
+                st.success("Tabla reseteada.")
+                st.rerun()
+            except NameError:
+                st.error("Función 'forzar_reset_maestro' no definida.")
 
     st.divider()
     st.subheader("📅 Planificación Semanal")
     dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     dia_edit = st.selectbox("Día:", dias_semana)
     
-    # Cargar datos (aplica herencia si no hay registro para esta semana)
-    cal_actual = cargar_semana(st.session_state.fecha_referencia) or {d: [] for d in dias_semana}
+    # Cargar datos para la semana actual en vista
+    cal_actual = cargar_semana(st.session_state.fecha_referencia)
     provs_input = st.text_area("Proveedores (sep. por coma):", value=", ".join(cal_actual.get(dia_edit, [])))
 
     st.divider()
@@ -123,26 +128,23 @@ with st.sidebar:
     new_c = st.text_input("Comprador Asignado:")
     
     if st.button("💾 Guardar Cambios"):
-        # Al guardar, fijamos físicamente los datos para esta semana
+        # Actualizamos diccionario local
         cal_actual[dia_edit] = [p.strip().upper() for p in provs_input.split(",") if p.strip()]
+        # Guardamos en DB
         guardar_calendario(st.session_state.fecha_referencia, cal_actual)
         
         if new_p and new_c:
             registrar_comprador(new_p, new_c)
             
-        st.success("Datos fijados. Esta configuración se heredará a las semanas futuras.")
+        st.success("Datos fijados correctamente.")
         st.rerun()
 
     st.divider()
     if st.checkbox("🔍 Gestionar Registros de Compradores"):
         df_m = obtener_compradores_autorizados()
         if not df_m.empty:
-            st.caption("Edite directamente en la tabla o elimine un proveedor específico abajo.")
-            edited_m = st.data_editor(df_m, 
-                                     column_config={"id": None}, 
-                                     hide_index=True, 
-                                     use_container_width=True,
-                                     key="editor_compradores")
+            st.caption("Edite directamente en la tabla.")
+            edited_m = st.data_editor(df_m, column_config={"id": None}, hide_index=True, use_container_width=True, key="editor_compradores")
             
             if st.button("🔄 Aplicar Cambios de la Tabla"):
                 conn = sqlite3.connect('calendario.db')
@@ -156,22 +158,14 @@ with st.sidebar:
 
             st.divider()
             opciones_borrar = {row['id']: f"{row['nombre']} - ({row['comprador_habitual']})" for _, row in df_m.iterrows()}
-            id_para_borrar = st.selectbox(
-                "Seleccione el PROVEEDOR a eliminar:", 
-                options=list(opciones_borrar.keys()),
-                format_func=lambda x: opciones_borrar[x]
-            )
+            id_para_borrar = st.selectbox("Eliminar Proveedor:", options=list(opciones_borrar.keys()), format_func=lambda x: opciones_borrar[x])
             
-            if st.button("🗑️ Eliminar Proveedor Seleccionado", type="primary"):
+            if st.button("🗑️ Eliminar Seleccionado", type="primary"):
                 eliminar_comprador(id_para_borrar)
-                st.toast(f"Registro eliminado con éxito")
                 st.rerun()
         else:
             st.info("No hay proveedores registrados.")
-with st.sidebar:
-    st.header("⚙️ Configuración")
-    
-    # NUEVO: Botón de reinicio total
+
     with st.expander("⚠️ Zona de Peligro"):
         if st.button("REINICIAR TODA LA BASE DE DATOS"):
             conn = sqlite3.connect('calendario.db')
@@ -180,8 +174,8 @@ with st.sidebar:
             cursor.execute("DROP TABLE IF EXISTS calendario_historico")
             conn.commit()
             conn.close()
-            init_db() # Re-crea las tablas vacías
-            st.success("Base de datos borrada. Reiniciando...")
+            init_db() 
+            st.warning("Base de datos borrada.")
             st.rerun()
 # --- 4. ÁREA PRINCIPAL ---
 st.title("📅 Monitor de Órdenes de Compra")
