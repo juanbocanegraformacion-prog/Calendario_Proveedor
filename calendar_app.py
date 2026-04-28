@@ -279,7 +279,7 @@ components.html(
     <script>
     setTimeout(function(){
         window.location.reload();
-    }, 6000);
+    }, 3000);
     </script>
     """,
     height=0,
