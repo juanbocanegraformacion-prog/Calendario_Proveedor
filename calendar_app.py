@@ -375,7 +375,7 @@ else:
                 ordenes = []
                 for _, row in df_f.iterrows():
                     ordenes.append({
-                        'numero': str(row['Número de orden'])[-5:],
+                        'numero': str(row['Número de orden'])[-12:],
                         'proveedor': row['Proveedor'],
                         'comprador': row['Comprador'],
                         'sucursal': row['SucursalDestino']
