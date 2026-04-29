@@ -371,16 +371,17 @@ else:
             df_f = df_raw[df_raw.apply(validar, axis=1)].copy()
 
             if not df_f.empty:
-                # Extraer información para el carrusel
-                ordenes = []
-                for _, row in df_f.iterrows():
-                    ordenes.append({
-                        'numero': str(row['Número de orden'])[-12:],
-                        'proveedor': row['Proveedor'],
-                        'comprador': row['Comprador'],
-                        'sucursal': row['SucursalDestino']
-                    })
-                ordenes_json = json.dumps(ordenes)
+           # Extraer información para el carrusel
+             ordenes = []
+            for _, row in df_f.iterrows():
+             ordenes.append({
+            # Simplemente convierte a string sin aplicar el [-12:]
+            'numero': str(row['Número de orden']), 
+            'proveedor': row['Proveedor'],
+            'comprador': row['Comprador'],
+            'sucursal': row['SucursalDestino']
+               })
+             ordenes_json = json.dumps(ordenes)
 
                 # HTML/JS del carrusel (único elemento, sin panel lateral)
                 carrusel_html = f"""
