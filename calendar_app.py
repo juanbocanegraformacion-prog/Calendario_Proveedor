@@ -114,16 +114,18 @@ def cargar_semana(fecha_consulta):
         "SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?",
         conn, params=(fecha_str,)
     )
-    def split_prov(s):
-        if not s: return []
-        # Nuevo formato con pipe (|) para respetar comas en nombres
+    # ----- FUNCIÓN CORREGIDA: Nunca divide por coma -----
+    def split_prov_safe(s):
+        if not s:
+            return []
+        # Usamos pipe como separador único
         if '|' in s:
             return [p.strip() for p in s.split('|') if p.strip()]
-        # Compatibilidad con formato antiguo (coma simple – puede fallar con nombres que tengan coma)
-        return [p.strip() for p in s.split(',') if p.strip()]
+        # Si no hay pipe, es un solo proveedor (aunque tenga comas)
+        return [s.strip()]
 
     if not df.empty:
-        res = dict(zip(df['dia_semana'], df['proveedores'].apply(split_prov)))
+        res = dict(zip(df['dia_semana'], df['proveedores'].apply(split_prov_safe)))
         conn.close()
         return res
 
@@ -136,7 +138,7 @@ def cargar_semana(fecha_consulta):
             conn, params=(ultima[0],)
         )
         conn.close()
-        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(split_prov)))
+        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(split_prov_safe)))
 
     conn.close()
     return {d: [] for d in dias_semana}
