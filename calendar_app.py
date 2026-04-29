@@ -380,7 +380,7 @@ else:
 
                     ordenes.append({
 
-                        'numero': str(row['Número de orden'])[-12:],
+                        'numero': str(row['Número de orden'])[-19:],
 
                         'proveedor': row['Proveedor'],
 
