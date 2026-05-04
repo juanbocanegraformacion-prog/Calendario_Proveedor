@@ -13,79 +13,31 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 
 # ------------------------------------------------------------
-# CSS PERSONALIZADO (carrusel y ajustes visuales)
-# ------------------------------------------------------------
-st.markdown("""
-<style>
-    .carousel-card {
-        background-color: #FFFFFF;
-        border: 5px solid #2E7D32;
-        border-radius: 20px;
-        box-shadow: 0 8px 16px rgba(0,0,0,0.25), 0 12px 40px rgba(0,0,0,0.15);
-        padding: 40px;
-        text-align: center;
-        margin: 20px auto;
-        width: 100%;
-    }
-    .carousel-title {
-        font-size: 2rem;
-        font-weight: bold;
-        color: #2E7D32;
-        margin-bottom: 15px;
-    }
-    .carousel-order-number {
-        font-size: 8rem;
-        font-weight: 900;
-        color: #1B5E20;
-        line-height: 1;
-    }
-    .carousel-info {
-        font-size: 2rem;
-        font-weight: bold;
-        color: #333;
-    }
-    /* El comprador y la sucursal destino ahora tienen el mismo tamaño y peso que el proveedor */
-    .carousel-detail {
-        font-size: 2rem;
-        font-weight: bold;
-        color: #333;
-        margin-top: 10px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ------------------------------------------------------------
-# VARIABLES GLOBALES
-# ------------------------------------------------------------
-dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
-
-# ------------------------------------------------------------
-# BASE DE DATOS (SQLite)
+# BASE DE DATOS (SQLite) - Persistencia Mejorada
 # ------------------------------------------------------------
 def init_db():
-    conn = sqlite3.connect('calendario.db')
+    conn = sqlite3.connect('calendario.db', check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS proveedores_maestro
-                      (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, comprador_habitual TEXT)''')
+                      (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                       nombre TEXT, 
+                       comprador_habitual TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS calendario_historico
-                      (id INTEGER PRIMARY KEY, fecha_semana TEXT, dia_semana TEXT, proveedores TEXT)''')
-    cursor.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_fecha_dia
-                      ON calendario_historico (fecha_semana, dia_semana)''')
+                      (id INTEGER PRIMARY KEY, 
+                       fecha_semana TEXT, 
+                       dia_semana TEXT, 
+                       proveedores TEXT)''')
+    try:
+        cursor.execute('''CREATE UNIQUE INDEX idx_fecha_dia ON calendario_historico (fecha_semana, dia_semana)''')
+    except sqlite3.OperationalError:
+        pass 
     conn.commit()
     conn.close()
-
-def forzar_reset_maestro():
-    conn = sqlite3.connect('calendario.db')
-    cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS proveedores_maestro")
-    conn.commit()
-    conn.close()
-    st.cache_data.clear()
-    init_db()
 
 init_db()
+
 # ------------------------------------------------------------
-# AUTENTICACIÓN POR CONTRASEÑA
+# AUTENTICACIÓN
 # ------------------------------------------------------------
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
@@ -96,16 +48,17 @@ if not st.session_state.autenticado:
         password = st.text_input("Contraseña", type="password")
         submitted = st.form_submit_button("Acceder")
         if submitted:
-            # ---- CAMBIA ESTA CONTRASEÑA POR LA QUE DESEES ----
             if password == "RioMarket2026":
                 st.session_state.autenticado = True
-                st.rerun()  # Recarga para mostrar la app
+                st.rerun()
             else:
                 st.error("Contraseña incorrecta")
-    st.stop()  # Detiene la ejecución del resto del código
+    st.stop()
 
-# Si llega aquí, está autenticado → se carga la app normalmente
-# (El resto de tu código sigue aquí, sin necesidad de más cambios)
+# ------------------------------------------------------------
+# FUNCIONES DE LÓGICA
+# ------------------------------------------------------------
+dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
 def cargar_semana(fecha_consulta):
     conn = sqlite3.connect('calendario.db')
@@ -114,21 +67,17 @@ def cargar_semana(fecha_consulta):
         "SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?",
         conn, params=(fecha_str,)
     )
-    # ----- FUNCIÓN CORREGIDA: Nunca divide por coma -----
+
     def split_prov_safe(s):
-        if not s:
-            return []
-        # Usamos pipe como separador único
-        if '|' in s:
-            return [p.strip() for p in s.split('|') if p.strip()]
-        # Si no hay pipe, es un solo proveedor (aunque tenga comas)
-        return [s.strip()]
+        if not s: return []
+        return [p.strip() for p in s.split('|') if p.strip()]
 
     if not df.empty:
         res = dict(zip(df['dia_semana'], df['proveedores'].apply(split_prov_safe)))
         conn.close()
         return res
 
+    # Si no hay datos, buscar la última semana planificada para clonar
     cursor = conn.cursor()
     cursor.execute("SELECT MAX(fecha_semana) FROM calendario_historico WHERE fecha_semana < ?", (fecha_str,))
     ultima = cursor.fetchone()
@@ -147,35 +96,11 @@ def guardar_calendario(fecha, calendario_dict):
     conn = sqlite3.connect('calendario.db')
     cursor = conn.cursor()
     for dia, lista_provs in calendario_dict.items():
-        # Usamos '|' como separador interno para respetar comas en nombres
         provs_str = "|".join([p.strip().upper() for p in lista_provs if p.strip()])
         cursor.execute(
             "INSERT OR REPLACE INTO calendario_historico (fecha_semana, dia_semana, proveedores) VALUES (?, ?, ?)",
             (str(fecha), dia, provs_str)
         )
-    conn.commit()
-    conn.close()
-
-def registrar_comprador(proveedor, comprador):
-    conn = sqlite3.connect('calendario.db')
-    cursor = conn.cursor()
-    p_up, c_up = proveedor.strip().upper(), comprador.strip().upper()
-    try:
-        cursor.execute("SELECT 1 FROM proveedores_maestro WHERE nombre = ? AND comprador_habitual = ?", (p_up, c_up))
-        if not cursor.fetchone():
-            cursor.execute("INSERT INTO proveedores_maestro (nombre, comprador_habitual) VALUES (?, ?)", (p_up, c_up))
-            conn.commit()
-            conn.close()
-            return True
-    except sqlite3.IntegrityError:
-        pass
-    conn.close()
-    return False
-
-def eliminar_comprador(id_registro):
-    conn = sqlite3.connect('calendario.db')
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM proveedores_maestro WHERE id = ?", (id_registro,))
     conn.commit()
     conn.close()
 
@@ -204,269 +129,139 @@ if 'fecha_referencia' not in st.session_state:
 # SIDEBAR
 # ------------------------------------------------------------
 with st.sidebar:
-    st.header("⚙️ Panel de Configuración")
+    st.header("⚙️ Configuración")
 
     with st.expander("📅 Planificación Semanal", expanded=True):
         dia_edit = st.selectbox("Día a editar:", dias_semana)
         cal_actual = cargar_semana(st.session_state.fecha_referencia)
         provs_registrados = obtener_proveedores_registrados()
+        
         if not provs_registrados:
-            st.warning("No hay proveedores registrados aún. Agregue al menos uno en la sección 'Registro Compradores' primero.")
+            st.warning("Registre proveedores primero.")
         else:
             seleccion_actual = [p for p in cal_actual.get(dia_edit, []) if p in provs_registrados]
             nuevos_seleccionados = st.multiselect(
-                "Proveedores para este día:",
-                options=provs_registrados,
-                default=seleccion_actual
+                "Proveedores:", options=provs_registrados, default=seleccion_actual
             )
-            if st.button("💾 Guardar planificación"):
+            if st.button("💾 Guardar Plan"):
                 cal_actual[dia_edit] = [p.strip().upper() for p in nuevos_seleccionados]
                 guardar_calendario(st.session_state.fecha_referencia, cal_actual)
-                st.success("Planificación actualizada.")
+                st.success("Guardado.")
                 st.rerun()
 
-    with st.expander("👤 Registro Compradores"):
-        st.caption("Agregar proveedor y comprador")
-        new_p = st.text_input("Proveedor:", key="np")
-        new_c = st.text_input("Comprador asignado:", key="nc")
-        if st.button("➕ Registrar nuevo par"):
+    with st.expander("👤 Registro Maestro"):
+        new_p = st.text_input("Proveedor:").upper()
+        new_c = st.text_input("Comprador:").upper()
+        if st.button("➕ Agregar"):
             if new_p and new_c:
-                if registrar_comprador(new_p, new_c):
-                    st.success(f"Registrado: {new_p.upper()} → {new_c.upper()}")
-                else:
-                    st.warning("Ese Registro ya existe.")
-                st.rerun()
-            else:
-                st.error("Complete ambos campos.")
-        st.divider()
-        st.caption("Gestión de registros existentes")
-        df_m = obtener_compradores_autorizados()
-        if not df_m.empty:
-            edited_m = st.data_editor(
-                df_m,
-                column_config={"id": None},
-                hide_index=True,
-                use_container_width=True,
-                key="editor_compradores"
-            )
-            if st.button("🔄 Aplicar cambios"):
                 conn = sqlite3.connect('calendario.db')
-                for _, row in edited_m.iterrows():
-                    conn.execute(
-                        "UPDATE proveedores_maestro SET nombre = ?, comprador_habitual = ? WHERE id = ?",
-                        (row['nombre'].upper(), row['comprador_habitual'].upper(), row['id'])
-                    )
+                conn.execute("INSERT INTO proveedores_maestro (nombre, comprador_habitual) VALUES (?, ?)", (new_p, new_c))
                 conn.commit()
                 conn.close()
-                st.success("Registros actualizados.")
                 st.rerun()
-
-            opciones_borrar = {
-                row['id']: f"{row['nombre']} - ({row['comprador_habitual']})"
-                for _, row in df_m.iterrows()
-            }
-            id_para_borrar = st.selectbox(
-                "Eliminar par Proveedor-Comprador:",
-                options=list(opciones_borrar.keys()),
-                format_func=lambda x: opciones_borrar[x]
-            )
-            if st.button("🗑️ Eliminar seleccionado", type="primary"):
-                eliminar_comprador(id_para_borrar)
-                st.success("Eliminado.")
-                st.rerun()
-        else:
-            st.info("No hay registros de compradores aún.")
-
-    # Zona de Peligro con comentarios explicativos
-    #with st.expander("⚠️ Zona de Peligro"):
-    #    # Botón para reiniciar únicamente la tabla de proveedores maestro
-    #    if st.button("🔄 Reparar tabla de Proveedores (Reset)"):
-    #        # Elimina y recrea la tabla proveedores_maestro, conserva el calendario histórico
-    #        forzar_reset_maestro()
-    #        st.warning("Tabla de proveedores reiniciada.")
-    #        st.rerun()
-    #
-    #    # Botón para eliminar completamente la base de datos y volver a crearla vacía
-    #    if st.button("💣 REINICIAR TODA LA BASE DE DATOS"):
-    #        conn = sqlite3.connect('calendario.db')
-    #        cursor = conn.cursor()
-    #        # Se borran ambas tablas
-    #        cursor.execute("DROP TABLE IF EXISTS proveedores_maestro")
-    #        cursor.execute("DROP TABLE IF EXISTS calendario_historico")
-    #        conn.commit()
-    #        conn.close()
-    #        # Se vuelven a crear las tablas vacías
-    #        init_db()
-    #        st.warning("Base de datos completamente borrada y recreada.")
-    #        st.rerun()
 
 # ------------------------------------------------------------
 # ÁREA PRINCIPAL
 # ------------------------------------------------------------
 st.title("📅 Monitor de Órdenes de Compra")
 
-c1, c2, c3 = st.columns([1, 2, 1])
-with c1:
-    if st.button("⬅️ Semana anterior"):
+col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
+with col_nav1:
+    if st.button("⬅️ Anterior"):
         st.session_state.fecha_referencia -= timedelta(days=7)
         st.rerun()
-with c3:
-    if st.button("Semana siguiente ➡️"):
+with col_nav3:
+    if st.button("Siguiente ➡️"):
         st.session_state.fecha_referencia += timedelta(days=7)
         st.rerun()
 
 st.markdown(f"### Semana del {st.session_state.fecha_referencia.strftime('%d/%m/%Y')}")
 cal_data = cargar_semana(st.session_state.fecha_referencia)
 
-# Construir tabla de la semana con los días ordenados de Lunes a Domingo
-df_visual = pd.DataFrame.from_dict(cal_data, orient='index').transpose().fillna("-")
-# Asegurar el orden de las columnas según la lista dias_semana
-columnas_ordenadas = [dia for dia in dias_semana if dia in df_visual.columns]
-df_visual = df_visual[columnas_ordenadas]
-
-st.dataframe(df_visual, use_container_width=True, hide_index=True)
+# Visualización de tabla
+df_vis = pd.DataFrame.from_dict(cal_data, orient='index').transpose().fillna("-")
+st.dataframe(df_vis[dias_semana], use_container_width=True, hide_index=True)
 
 st.divider()
 
 # ------------------------------------------------------------
-# SISTEMA CARRUSEL (rotación automática cada 6 segundos)
+# SISTEMA DE MONITOREO (CARRUSEL)
 # ------------------------------------------------------------
-st.subheader("🤖 Monitoreo en Tiempo Real")
+st.subheader("🤖 Monitoreo de Registros")
 
-dia_hoy_es = dias_semana[datetime.now().weekday()]
-provs_hoy = cal_data.get(dia_hoy_es, [])
+# Lógica para evitar que los registros "desaparezcan" al cambiar de día
+es_semana_actual = st.session_state.fecha_referencia == (datetime.now() - timedelta(days=datetime.now().weekday())).date()
+
+if es_semana_actual:
+    dia_actual_nombre = dias_semana[datetime.now().weekday()]
+    dia_monitoreo = st.selectbox("Filtrar por día:", dias_semana, index=datetime.now().weekday())
+else:
+    dia_monitoreo = st.selectbox("Seleccione día de esta semana para ver registros:", dias_semana)
+
+provs_hoy = cal_data.get(dia_monitoreo, [])
 
 if not provs_hoy:
-    st.info(f"Hoy ({dia_hoy_es}) no hay proveedores planificados.")
+    st.info(f"No hay proveedores planificados para el {dia_monitoreo}.")
 else:
     url = "https://raw.githubusercontent.com/juanbocanegraformacion-prog/Calendario_Proveedor/main/ODC_alerta.xlsx"
     try:
         res = requests.get(url)
         df_raw = pd.read_excel(io.BytesIO(res.content))
         df_raw.columns = df_raw.columns.str.strip()
-        # Renombrar columnas clave
-        df_raw = df_raw.rename(columns={
-            'Creado por': 'Comprador',
-            'Sucursal destino': 'SucursalDestino'
-        })
+        df_raw = df_raw.rename(columns={'Creado por': 'Comprador', 'Sucursal destino': 'SucursalDestino'})
 
         df_aut = obtener_compradores_autorizados()
-        if df_aut.empty:
-            st.warning("No hay pares Proveedor-Comprador registrados. Agréguelos en el panel lateral.")
-        else:
-            df_aut['key'] = (
-                df_aut['nombre'].str.upper().str.strip() + "|" +
-                df_aut['comprador_habitual'].str.upper().str.strip()
-            )
+        if not df_aut.empty:
+            df_aut['key'] = df_aut['nombre'].str.strip().upper() + "|" + df_aut['comprador_habitual'].str.strip().upper()
             set_aut = set(df_aut['key'].tolist())
+            
             proveedores_upper = [p.strip().upper() for p in provs_hoy]
 
             def validar(row):
-                p = str(row['Proveedor']).upper().strip()
-                c = str(row['Comprador']).upper().strip()
-                if p not in proveedores_upper:
-                    return False
-                return f"{p}|{c}" in set_aut
+                p = str(row['Proveedor']).strip().upper()
+                c = str(row['Comprador']).strip().upper()
+                return (p in proveedores_upper) and (f"{p}|{c}" in set_aut)
 
             df_f = df_raw[df_raw.apply(validar, axis=1)].copy()
 
             if not df_f.empty:
-
-                # Extraer información para el carrusel
-
                 ordenes = []
-
                 for _, row in df_f.iterrows():
-
                     ordenes.append({
-
                         'numero': str(row['Número de orden'])[-19:],
-
                         'proveedor': row['Proveedor'],
-
                         'comprador': row['Comprador'],
-
                         'sucursal': row['SucursalDestino']
-
                     })
 
                 ordenes_json = json.dumps(ordenes)
-
-                # HTML/JS del carrusel (único elemento, sin panel lateral)
+                
                 carrusel_html = f"""
-                <style>
-                .carousel-card {{
-                    background-color: #FFFFFF;
-                    border: 5px solid #2E7D32;
-                    border-radius: 20px;
-                    box-shadow: 0 8px 16px rgba(0,0,0,0.25), 0 12px 40px rgba(0,0,0,0.15);
-                    padding: 40px;
-                    text-align: center;
-                    margin: 20px auto;
-                    width: 80%;
-                }}
-                .carousel-title {{
-                    font-size: 2rem;
-                    font-weight: bold;
-                    color: #2E7D32;
-                    margin-bottom: 15px;
-                }}
-                .carousel-order-number {{
-                    font-size: 8rem;
-                    font-weight: 900;
-                    color: #1B5E20;
-                    line-height: 1;
-                }}
-                .carousel-info {{
-                    font-size: 2rem;
-                    font-weight: bold;
-                    color: #333;
-                }}
-                .carousel-detail {{
-                    font-size: 2rem;
-                    font-weight: bold;
-                    color: #333;
-                    margin-top: 10px;
-                }}
-                </style>
-                <div id="carousel-container">
-                    <div class="carousel-card">
-                        <div class="carousel-title">ORDEN DE COMPRA</div>
-                        <div class="carousel-order-number">#---</div>
-                        <div class="carousel-info">---</div>
-                        <div class="carousel-detail">Comprador: ---</div>
-                        <div class="carousel-detail">Sucursal Destino: ---</div>
-                    </div>
+                <div id="carousel-container" style="background:#fff; border:5px solid #2E7D32; border-radius:20px; padding:40px; text-align:center; font-family:sans-serif;">
+                    <div style="font-size:2rem; color:#2E7D32; font-weight:bold;">ORDEN DE COMPRA</div>
+                    <div id="ord-num" style="font-size:6rem; color:#1B5E20; font-weight:900;">#---</div>
+                    <div id="ord-prov" style="font-size:2rem; font-weight:bold; color:#333;">---</div>
+                    <div id="ord-comp" style="font-size:1.5rem; color:#444; margin-top:10px;">---</div>
+                    <div id="ord-suc" style="font-size:1.5rem; color:#444;">---</div>
                 </div>
                 <script>
-                const orders = {ordenes_json};
-                let currentIndex = 0;
-                function showOrder(index) {{
-                    const order = orders[index];
-                    document.querySelector('#carousel-container .carousel-order-number').textContent = '#' + order.numero;
-                    document.querySelector('#carousel-container .carousel-info').textContent = order.proveedor;
-                    const details = document.querySelectorAll('#carousel-container .carousel-detail');
-                    details[0].textContent = 'Comprador: ' + order.comprador;
-                    details[1].textContent = 'Sucursal Destino: ' + order.sucursal;
-                }}
-                showOrder(0);
-                setInterval(() => {{
-                    currentIndex = (currentIndex + 1) % orders.length;
-                    showOrder(currentIndex);
-                }}, 6000);
+                    const orders = {ordenes_json};
+                    let idx = 0;
+                    function update() {{
+                        const o = orders[idx];
+                        document.getElementById('ord-num').textContent = '#' + o.numero;
+                        document.getElementById('ord-prov').textContent = o.proveedor;
+                        document.getElementById('ord-comp').textContent = 'Comprador: ' + o.comprador;
+                        document.getElementById('ord-suc').textContent = 'Destino: ' + o.sucursal;
+                        idx = (idx + 1) % orders.length;
+                    }}
+                    update();
+                    setInterval(update, 6000);
                 </script>
                 """
-                components.html(carrusel_html, height=550)
-                st.caption(f"🔄 {len(ordenes)} órdenes validadas rotando cada 6 segundos")
+                components.html(carrusel_html, height=450)
+                st.caption(f"🔄 Rotando {len(ordenes)} órdenes validadas.")
             else:
-                # Sin órdenes válidas, se muestra el diagnóstico
-                st.info("Buscando órdenes validadas... (ninguna coincide aún)")
-                with st.expander("🔍 Ver diagnóstico de filtros"):
-                    st.write("**Proveedores planificados para hoy:**", proveedores_upper)
-                    st.write("**Pares Proveedor-Comprador registrados:**")
-                    st.dataframe(df_aut[['nombre', 'comprador_habitual']].rename(
-                        columns={'nombre': 'Proveedor', 'comprador_habitual': 'Comprador'}
-                    ))
-                    st.caption("Asegúrese de que el nombre del proveedor en la planificación sea **exactamente igual** al que aparece en el archivo Excel (respetando comas, puntos, espacios).")
+                st.warning("No se encontraron órdenes en el Excel que coincidan con la planificación de este día.")
     except Exception as e:
-        st.error(f"Error en la sincronización: {e}")
+        st.error(f"Error de conexión: {e}")
