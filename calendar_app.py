@@ -17,39 +17,61 @@ st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 # ------------------------------------------------------------
 st.markdown("""
 <style>
+    /* Estilos base del carrusel */
     .carousel-card {
         background-color: #FFFFFF;
         border: 5px solid #2E7D32;
         border-radius: 20px;
         box-shadow: 0 8px 16px rgba(0,0,0,0.25), 0 12px 40px rgba(0,0,0,0.15);
-        padding: 40px;
+        padding: 5vw;                /* padding relativo al ancho de ventana */
         text-align: center;
         margin: 20px auto;
-        width: 100%;
+        width: 90%;
+        max-width: 800px;            /* límite en pantallas grandes */
     }
     .carousel-title {
-        font-size: 2rem;
+        font-size: clamp(2rem, 5vw, 3rem);  /* adaptable entre 2rem y 3rem */
         font-weight: bold;
         color: #2E7D32;
         margin-bottom: 15px;
     }
     .carousel-order-number {
-        font-size: 8rem;
+        font-size: clamp(3rem, 15vw, 8rem); /* desde 3rem hasta 8rem según el ancho */
         font-weight: 900;
         color: #1B5E20;
         line-height: 1;
     }
     .carousel-info {
-        font-size: 2rem;
+        font-size: clamp(1.5rem, 5vw, 2.5rem);
         font-weight: bold;
         color: #333;
     }
-    /* El comprador y la sucursal destino ahora tienen el mismo tamaño y peso que el proveedor */
     .carousel-detail {
-        font-size: 2rem;
+        font-size: clamp(1.2rem, 4vw, 2rem);
         font-weight: bold;
         color: #333;
         margin-top: 10px;
+    }
+    /* Ajustes para pantallas muy pequeñas */
+    @media (max-width: 768px) {
+        .carousel-card {
+            padding: 20px;
+            width: 98%;
+            border-width: 3px;
+            border-radius: 15px;
+        }
+        .carousel-order-number {
+            font-size: 3.5rem;
+        }
+        .carousel-title {
+            font-size: 1.5rem;
+        }
+        .carousel-info {
+            font-size: 1.3rem;
+        }
+        .carousel-detail {
+            font-size: 1.1rem;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -279,23 +301,18 @@ with st.sidebar:
 
     # Zona de Peligro con comentarios explicativos
     #with st.expander("⚠️ Zona de Peligro"):
-    #    # Botón para reiniciar únicamente la tabla de proveedores maestro
     #    if st.button("🔄 Reparar tabla de Proveedores (Reset)"):
-    #        # Elimina y recrea la tabla proveedores_maestro, conserva el calendario histórico
     #        forzar_reset_maestro()
     #        st.warning("Tabla de proveedores reiniciada.")
     #        st.rerun()
     #
-    #    # Botón para eliminar completamente la base de datos y volver a crearla vacía
     #    if st.button("💣 REINICIAR TODA LA BASE DE DATOS"):
     #        conn = sqlite3.connect('calendario.db')
     #        cursor = conn.cursor()
-    #        # Se borran ambas tablas
     #        cursor.execute("DROP TABLE IF EXISTS proveedores_maestro")
     #        cursor.execute("DROP TABLE IF EXISTS calendario_historico")
     #        conn.commit()
     #        conn.close()
-    #        # Se vuelven a crear las tablas vacías
     #        init_db()
     #        st.warning("Base de datos completamente borrada y recreada.")
     #        st.rerun()
@@ -400,33 +417,54 @@ else:
                     border: 5px solid #2E7D32;
                     border-radius: 20px;
                     box-shadow: 0 8px 16px rgba(0,0,0,0.25), 0 12px 40px rgba(0,0,0,0.15);
-                    padding: 40px;
+                    padding: 5vw;
                     text-align: center;
                     margin: 20px auto;
-                    width: 80%;
+                    width: 90%;
+                    max-width: 800px;
                 }}
                 .carousel-title {{
-                    font-size: 2rem;
+                    font-size: clamp(2rem, 5vw, 3rem);
                     font-weight: bold;
                     color: #2E7D32;
                     margin-bottom: 15px;
                 }}
                 .carousel-order-number {{
-                    font-size: 8rem;
+                    font-size: clamp(3rem, 15vw, 8rem);
                     font-weight: 900;
                     color: #1B5E20;
                     line-height: 1;
                 }}
                 .carousel-info {{
-                    font-size: 2rem;
+                    font-size: clamp(1.5rem, 5vw, 2.5rem);
                     font-weight: bold;
                     color: #333;
                 }}
                 .carousel-detail {{
-                    font-size: 2rem;
+                    font-size: clamp(1.2rem, 4vw, 2rem);
                     font-weight: bold;
                     color: #333;
                     margin-top: 10px;
+                }}
+                @media (max-width: 768px) {{
+                    .carousel-card {{
+                        padding: 20px;
+                        width: 98%;
+                        border-width: 3px;
+                        border-radius: 15px;
+                    }}
+                    .carousel-order-number {{
+                        font-size: 3.5rem;
+                    }}
+                    .carousel-title {{
+                        font-size: 1.5rem;
+                    }}
+                    .carousel-info {{
+                        font-size: 1.3rem;
+                    }}
+                    .carousel-detail {{
+                        font-size: 1.1rem;
+                    }}
                 }}
                 </style>
                 <div id="carousel-container">
