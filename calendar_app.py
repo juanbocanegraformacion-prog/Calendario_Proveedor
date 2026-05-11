@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import requests
 import io
-import sqlite3
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import streamlit.components.v1 as components
+from supabase import create_client, Client
 
 # ------------------------------------------------------------
 # CONFIGURACIÓN DE PÁGINA
@@ -13,30 +13,29 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 
 # ------------------------------------------------------------
-# CSS PERSONALIZADO (carrusel y ajustes visuales)
+# CSS PERSONALIZADO (carrusel) – idéntico al original
 # ------------------------------------------------------------
 st.markdown("""
 <style>
-    /* Estilos base del carrusel */
     .carousel-card {
         background-color: #FFFFFF;
         border: 5px solid #2E7D32;
         border-radius: 20px;
         box-shadow: 0 8px 16px rgba(0,0,0,0.25), 0 12px 40px rgba(0,0,0,0.15);
-        padding: 5vw;                /* padding relativo al ancho de ventana */
+        padding: 5vw;
         text-align: center;
         margin: 20px auto;
         width: 90%;
-        max-width: 800px;            /* límite en pantallas grandes */
+        max-width: 800px;
     }
     .carousel-title {
-        font-size: clamp(2rem, 5vw, 3rem);  /* adaptable entre 2rem y 3rem */
+        font-size: clamp(2rem, 5vw, 3rem);
         font-weight: bold;
         color: #2E7D32;
         margin-bottom: 15px;
     }
     .carousel-order-number {
-        font-size: clamp(3rem, 15vw, 8rem); /* desde 3rem hasta 8rem según el ancho */
+        font-size: clamp(3rem, 15vw, 8rem);
         font-weight: 900;
         color: #1B5E20;
         line-height: 1;
@@ -52,7 +51,6 @@ st.markdown("""
         color: #333;
         margin-top: 10px;
     }
-    /* Ajustes para pantallas muy pequeñas */
     @media (max-width: 768px) {
         .carousel-card {
             padding: 20px;
@@ -77,37 +75,138 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
+# CONFIGURACIÓN DE SUPABASE (REEMPLAZA A SQLite)
+# ------------------------------------------------------------
+# Asegúrate de tener estos secrets en Streamlit Cloud:
+# [secrets]
+# supabase_url = "https://xxxxxxxxxxxx.supabase.co"
+# supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz..." (anon key)
+
+supabase: Client = create_client(
+    st.secrets["supabase_url"],
+    st.secrets["supabase_key"]
+)
+
+# ------------------------------------------------------------
 # VARIABLES GLOBALES
 # ------------------------------------------------------------
 dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
 # ------------------------------------------------------------
-# BASE DE DATOS (SQLite)
+# FUNCIONES ADAPTADAS A SUPABASE
 # ------------------------------------------------------------
-def init_db():
-    conn = sqlite3.connect('calendario.db')
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS proveedores_maestro
-                      (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, comprador_habitual TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS calendario_historico
-                      (id INTEGER PRIMARY KEY, fecha_semana TEXT, dia_semana TEXT, proveedores TEXT)''')
-    cursor.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_fecha_dia
-                      ON calendario_historico (fecha_semana, dia_semana)''')
-    conn.commit()
-    conn.close()
+def cargar_semana(fecha_consulta):
+    """Carga la planificación de la semana indicada. Si no existe, busca la semana anterior más reciente."""
+    fecha_str = fecha_consulta.isoformat()  # 'YYYY-MM-DD'
+    
+    # Intentar obtener los registros para esa fecha_semana exacta
+    resp = supabase.table("calendario_historico") \
+        .select("dia_semana, proveedores") \
+        .eq("fecha_semana", fecha_str) \
+        .execute()
+    
+    if resp.data:
+        # Convertir a dict {dia: lista_provs}
+        result = {d: [] for d in dias_semana}
+        for row in resp.data:
+            dia = row["dia_semana"]
+            provs = row["proveedores"] if row["proveedores"] else []
+            if dia in result:
+                result[dia] = provs
+        return result
+    
+    # Si no hay datos para esa semana, buscar la semana más reciente anterior
+    resp_ant = supabase.table("calendario_historico") \
+        .select("fecha_semana, dia_semana, proveedores") \
+        .lt("fecha_semana", fecha_str) \
+        .order("fecha_semana", desc=True) \
+        .limit(7) \
+        .execute()
+    
+    if resp_ant.data:
+        # Agrupar por la fecha_semana más reciente encontrada
+        ultima_fecha = resp_ant.data[0]["fecha_semana"]
+        result = {d: [] for d in dias_semana}
+        for row in resp_ant.data:
+            if row["fecha_semana"] == ultima_fecha:
+                dia = row["dia_semana"]
+                provs = row["proveedores"] if row["proveedores"] else []
+                if dia in result:
+                    result[dia] = provs
+        return result
+    
+    # Si no hay ninguna semana anterior, devolver vacío
+    return {d: [] for d in dias_semana}
 
-def forzar_reset_maestro():
-    conn = sqlite3.connect('calendario.db')
-    cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS proveedores_maestro")
-    conn.commit()
-    conn.close()
-    st.cache_data.clear()
-    init_db()
+def guardar_calendario(fecha, calendario_dict):
+    """Guarda la planificación de una semana completa en Supabase."""
+    fecha_str = fecha.isoformat()
+    # Eliminar los registros existentes de esa semana para evitar duplicados
+    supabase.table("calendario_historico").delete().eq("fecha_semana", fecha_str).execute()
+    
+    # Preparar filas para insertar
+    rows = []
+    for dia, lista_provs in calendario_dict.items():
+        provs_limpios = [p.strip().upper() for p in lista_provs if p.strip()]
+        rows.append({
+            "fecha_semana": fecha_str,
+            "dia_semana": dia,
+            "proveedores": provs_limpios
+        })
+    
+    if rows:
+        supabase.table("calendario_historico").insert(rows).execute()
 
-init_db()
+def registrar_comprador(proveedor, comprador):
+    """Inserta un nuevo par proveedor-comprador. Retorna True si se creó, False si ya existe."""
+    p_up = proveedor.strip().upper()
+    c_up = comprador.strip().upper()
+    
+    # Verificar si ya existe ese par
+    resp = supabase.table("proveedores_maestro") \
+        .select("id") \
+        .eq("nombre", p_up) \
+        .eq("comprador_habitual", c_up) \
+        .execute()
+    
+    if resp.data:
+        return False  # Ya existe
+    
+    # Insertar nuevo
+    supabase.table("proveedores_maestro") \
+        .insert({"nombre": p_up, "comprador_habitual": c_up}) \
+        .execute()
+    return True
+
+def eliminar_comprador(id_registro):
+    """Elimina un registro de proveedor_maestro por su id."""
+    supabase.table("proveedores_maestro").delete().eq("id", id_registro).execute()
+
+def obtener_compradores_autorizados():
+    """Devuelve un DataFrame con id, nombre, comprador_habitual."""
+    resp = supabase.table("proveedores_maestro") \
+        .select("id, nombre, comprador_habitual") \
+        .order("nombre") \
+        .execute()
+    
+    if resp.data:
+        return pd.DataFrame(resp.data)
+    else:
+        return pd.DataFrame(columns=["id", "nombre", "comprador_habitual"])
+
+def obtener_proveedores_registrados():
+    """Lista de nombres únicos de proveedores."""
+    resp = supabase.table("proveedores_maestro") \
+        .select("nombre") \
+        .execute()
+    
+    if resp.data:
+        nombres = sorted(list(set(row["nombre"] for row in resp.data)))
+        return nombres
+    return []
+
 # ------------------------------------------------------------
-# AUTENTICACIÓN POR CONTRASEÑA
+# AUTENTICACIÓN POR CONTRASEÑA (sin cambios)
 # ------------------------------------------------------------
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
@@ -118,112 +217,22 @@ if not st.session_state.autenticado:
         password = st.text_input("Contraseña", type="password")
         submitted = st.form_submit_button("Acceder")
         if submitted:
-            # ---- CAMBIA ESTA CONTRASEÑA POR LA QUE DESEES ----
-            if password == "RioMarket2026":
+            if password == "RioMarket2026":  # Cambia la contraseña aquí
                 st.session_state.autenticado = True
-                st.rerun()  # Recarga para mostrar la app
+                st.rerun()
             else:
                 st.error("Contraseña incorrecta")
-    st.stop()  # Detiene la ejecución del resto del código
-
-# Si llega aquí, está autenticado → se carga la app normalmente
-# (El resto de tu código sigue aquí, sin necesidad de más cambios)
-
-def cargar_semana(fecha_consulta):
-    conn = sqlite3.connect('calendario.db')
-    fecha_str = str(fecha_consulta)
-    df = pd.read_sql_query(
-        "SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?",
-        conn, params=(fecha_str,)
-    )
-    # ----- FUNCIÓN CORREGIDA: Nunca divide por coma -----
-    def split_prov_safe(s):
-        if not s:
-            return []
-        # Usamos pipe como separador único
-        if '|' in s:
-            return [p.strip() for p in s.split('|') if p.strip()]
-        # Si no hay pipe, es un solo proveedor (aunque tenga comas)
-        return [s.strip()]
-
-    if not df.empty:
-        res = dict(zip(df['dia_semana'], df['proveedores'].apply(split_prov_safe)))
-        conn.close()
-        return res
-
-    cursor = conn.cursor()
-    cursor.execute("SELECT MAX(fecha_semana) FROM calendario_historico WHERE fecha_semana < ?", (fecha_str,))
-    ultima = cursor.fetchone()
-    if ultima and ultima[0]:
-        df_h = pd.read_sql_query(
-            "SELECT dia_semana, proveedores FROM calendario_historico WHERE fecha_semana = ?",
-            conn, params=(ultima[0],)
-        )
-        conn.close()
-        return dict(zip(df_h['dia_semana'], df_h['proveedores'].apply(split_prov_safe)))
-
-    conn.close()
-    return {d: [] for d in dias_semana}
-
-def guardar_calendario(fecha, calendario_dict):
-    conn = sqlite3.connect('calendario.db')
-    cursor = conn.cursor()
-    for dia, lista_provs in calendario_dict.items():
-        # Usamos '|' como separador interno para respetar comas en nombres
-        provs_str = "|".join([p.strip().upper() for p in lista_provs if p.strip()])
-        cursor.execute(
-            "INSERT OR REPLACE INTO calendario_historico (fecha_semana, dia_semana, proveedores) VALUES (?, ?, ?)",
-            (str(fecha), dia, provs_str)
-        )
-    conn.commit()
-    conn.close()
-
-def registrar_comprador(proveedor, comprador):
-    conn = sqlite3.connect('calendario.db')
-    cursor = conn.cursor()
-    p_up, c_up = proveedor.strip().upper(), comprador.strip().upper()
-    try:
-        cursor.execute("SELECT 1 FROM proveedores_maestro WHERE nombre = ? AND comprador_habitual = ?", (p_up, c_up))
-        if not cursor.fetchone():
-            cursor.execute("INSERT INTO proveedores_maestro (nombre, comprador_habitual) VALUES (?, ?)", (p_up, c_up))
-            conn.commit()
-            conn.close()
-            return True
-    except sqlite3.IntegrityError:
-        pass
-    conn.close()
-    return False
-
-def eliminar_comprador(id_registro):
-    conn = sqlite3.connect('calendario.db')
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM proveedores_maestro WHERE id = ?", (id_registro,))
-    conn.commit()
-    conn.close()
-
-def obtener_compradores_autorizados():
-    conn = sqlite3.connect('calendario.db')
-    df = pd.read_sql_query("SELECT id, nombre, comprador_habitual FROM proveedores_maestro", conn)
-    conn.close()
-    return df
-
-def obtener_proveedores_registrados():
-    conn = sqlite3.connect('calendario.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT nombre FROM proveedores_maestro ORDER BY nombre")
-    provs = [row[0] for row in cursor.fetchall()]
-    conn.close()
-    return provs
+    st.stop()
 
 # ------------------------------------------------------------
-# GESTIÓN DE FECHAS (sesión)
+# GESTIÓN DE FECHAS (igual)
 # ------------------------------------------------------------
 if 'fecha_referencia' not in st.session_state:
     hoy = datetime.now()
     st.session_state.fecha_referencia = (hoy - timedelta(days=hoy.weekday())).date()
 
 # ------------------------------------------------------------
-# SIDEBAR
+# SIDEBAR (adaptado a Supabase)
 # ------------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Panel de Configuración")
@@ -272,14 +281,14 @@ with st.sidebar:
                 key="editor_compradores"
             )
             if st.button("🔄 Aplicar cambios"):
-                conn = sqlite3.connect('calendario.db')
                 for _, row in edited_m.iterrows():
-                    conn.execute(
-                        "UPDATE proveedores_maestro SET nombre = ?, comprador_habitual = ? WHERE id = ?",
-                        (row['nombre'].upper(), row['comprador_habitual'].upper(), row['id'])
-                    )
-                conn.commit()
-                conn.close()
+                    supabase.table("proveedores_maestro") \
+                        .update({
+                            "nombre": row['nombre'].upper(),
+                            "comprador_habitual": row['comprador_habitual'].upper()
+                        }) \
+                        .eq("id", row['id']) \
+                        .execute()
                 st.success("Registros actualizados.")
                 st.rerun()
 
@@ -299,26 +308,8 @@ with st.sidebar:
         else:
             st.info("No hay registros de compradores aún.")
 
-    # Zona de Peligro con comentarios explicativos
-    #with st.expander("⚠️ Zona de Peligro"):
-    #    if st.button("🔄 Reparar tabla de Proveedores (Reset)"):
-    #        forzar_reset_maestro()
-    #        st.warning("Tabla de proveedores reiniciada.")
-    #        st.rerun()
-    #
-    #    if st.button("💣 REINICIAR TODA LA BASE DE DATOS"):
-    #        conn = sqlite3.connect('calendario.db')
-    #        cursor = conn.cursor()
-    #        cursor.execute("DROP TABLE IF EXISTS proveedores_maestro")
-    #        cursor.execute("DROP TABLE IF EXISTS calendario_historico")
-    #        conn.commit()
-    #        conn.close()
-    #        init_db()
-    #        st.warning("Base de datos completamente borrada y recreada.")
-    #        st.rerun()
-
 # ------------------------------------------------------------
-# ÁREA PRINCIPAL
+# ÁREA PRINCIPAL (sin cambios en lógica, solo en datos)
 # ------------------------------------------------------------
 st.title("📅 Monitor de Órdenes de Compra")
 
@@ -335,18 +326,15 @@ with c3:
 st.markdown(f"### Semana del {st.session_state.fecha_referencia.strftime('%d/%m/%Y')}")
 cal_data = cargar_semana(st.session_state.fecha_referencia)
 
-# Construir tabla de la semana con los días ordenados de Lunes a Domingo
 df_visual = pd.DataFrame.from_dict(cal_data, orient='index').transpose().fillna("-")
-# Asegurar el orden de las columnas según la lista dias_semana
 columnas_ordenadas = [dia for dia in dias_semana if dia in df_visual.columns]
 df_visual = df_visual[columnas_ordenadas]
-
 st.dataframe(df_visual, use_container_width=True, hide_index=True)
 
 st.divider()
 
 # ------------------------------------------------------------
-# SISTEMA CARRUSEL (rotación automática cada 6 segundos)
+# SISTEMA CARRUSEL (idéntico, solo usa los datos ya cargados)
 # ------------------------------------------------------------
 st.subheader("🤖 Monitoreo en Tiempo Real")
 
@@ -361,7 +349,6 @@ else:
         res = requests.get(url)
         df_raw = pd.read_excel(io.BytesIO(res.content))
         df_raw.columns = df_raw.columns.str.strip()
-        # Renombrar columnas clave
         df_raw = df_raw.rename(columns={
             'Creado por': 'Comprador',
             'Sucursal destino': 'SucursalDestino'
@@ -388,28 +375,16 @@ else:
             df_f = df_raw[df_raw.apply(validar, axis=1)].copy()
 
             if not df_f.empty:
-
-                # Extraer información para el carrusel
-
                 ordenes = []
-
                 for _, row in df_f.iterrows():
-
                     ordenes.append({
-
                         'numero': str(row['Número de orden'])[-19:],
-
                         'proveedor': row['Proveedor'],
-
                         'comprador': row['Comprador'],
-
                         'sucursal': row['SucursalDestino']
-
                     })
-
                 ordenes_json = json.dumps(ordenes)
 
-                # HTML/JS del carrusel (único elemento, sin panel lateral)
                 carrusel_html = f"""
                 <style>
                 .carousel-card {{
@@ -497,7 +472,6 @@ else:
                 components.html(carrusel_html, height=550)
                 st.caption(f"🔄 {len(ordenes)} órdenes validadas rotando cada 6 segundos")
             else:
-                # Sin órdenes válidas, se muestra el diagnóstico
                 st.info("Buscando órdenes validadas... (ninguna coincide aún)")
                 with st.expander("🔍 Ver diagnóstico de filtros"):
                     st.write("**Proveedores planificados para hoy:**", proveedores_upper)
