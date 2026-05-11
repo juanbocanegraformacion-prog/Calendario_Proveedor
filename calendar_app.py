@@ -13,7 +13,7 @@ from supabase import create_client, Client
 st.set_page_config(page_title="Monitor ODC - RIOMARKET", layout="wide")
 
 # ------------------------------------------------------------
-# CSS PERSONALIZADO (carrusel) – idéntico al original
+# CSS PERSONALIZADO (carrusel)
 # ------------------------------------------------------------
 st.markdown("""
 <style>
@@ -75,12 +75,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# CONFIGURACIÓN DE SUPABASE (REEMPLAZA A SQLite)
+# CONFIGURACIÓN DE SUPABASE
 # ------------------------------------------------------------
-# Asegúrate de tener estos secrets en Streamlit Cloud:
-# [secrets]
+# Secrets esperados en Streamlit Cloud:
 # supabase_url = "https://xxxxxxxxxxxx.supabase.co"
-# supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz..." (anon key)
+# supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."  (anon key)
 
 supabase: Client = create_client(
     st.secrets["supabase_url"],
@@ -93,20 +92,18 @@ supabase: Client = create_client(
 dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
 # ------------------------------------------------------------
-# FUNCIONES ADAPTADAS A SUPABASE
+# FUNCIONES DE DATOS (SUPABASE)
 # ------------------------------------------------------------
 def cargar_semana(fecha_consulta):
     """Carga la planificación de la semana indicada. Si no existe, busca la semana anterior más reciente."""
     fecha_str = fecha_consulta.isoformat()  # 'YYYY-MM-DD'
     
-    # Intentar obtener los registros para esa fecha_semana exacta
     resp = supabase.table("calendario_historico") \
         .select("dia_semana, proveedores") \
         .eq("fecha_semana", fecha_str) \
         .execute()
     
     if resp.data:
-        # Convertir a dict {dia: lista_provs}
         result = {d: [] for d in dias_semana}
         for row in resp.data:
             dia = row["dia_semana"]
@@ -115,7 +112,7 @@ def cargar_semana(fecha_consulta):
                 result[dia] = provs
         return result
     
-    # Si no hay datos para esa semana, buscar la semana más reciente anterior
+    # Buscar la semana anterior más reciente
     resp_ant = supabase.table("calendario_historico") \
         .select("fecha_semana, dia_semana, proveedores") \
         .lt("fecha_semana", fecha_str) \
@@ -124,7 +121,6 @@ def cargar_semana(fecha_consulta):
         .execute()
     
     if resp_ant.data:
-        # Agrupar por la fecha_semana más reciente encontrada
         ultima_fecha = resp_ant.data[0]["fecha_semana"]
         result = {d: [] for d in dias_semana}
         for row in resp_ant.data:
@@ -135,16 +131,14 @@ def cargar_semana(fecha_consulta):
                     result[dia] = provs
         return result
     
-    # Si no hay ninguna semana anterior, devolver vacío
     return {d: [] for d in dias_semana}
 
 def guardar_calendario(fecha, calendario_dict):
     """Guarda la planificación de una semana completa en Supabase."""
     fecha_str = fecha.isoformat()
-    # Eliminar los registros existentes de esa semana para evitar duplicados
+    # Eliminar registros previos de esa semana
     supabase.table("calendario_historico").delete().eq("fecha_semana", fecha_str).execute()
     
-    # Preparar filas para insertar
     rows = []
     for dia, lista_provs in calendario_dict.items():
         provs_limpios = [p.strip().upper() for p in lista_provs if p.strip()]
@@ -162,7 +156,6 @@ def registrar_comprador(proveedor, comprador):
     p_up = proveedor.strip().upper()
     c_up = comprador.strip().upper()
     
-    # Verificar si ya existe ese par
     resp = supabase.table("proveedores_maestro") \
         .select("id") \
         .eq("nombre", p_up) \
@@ -170,9 +163,8 @@ def registrar_comprador(proveedor, comprador):
         .execute()
     
     if resp.data:
-        return False  # Ya existe
+        return False
     
-    # Insertar nuevo
     supabase.table("proveedores_maestro") \
         .insert({"nombre": p_up, "comprador_habitual": c_up}) \
         .execute()
@@ -206,7 +198,7 @@ def obtener_proveedores_registrados():
     return []
 
 # ------------------------------------------------------------
-# AUTENTICACIÓN POR CONTRASEÑA (sin cambios)
+# AUTENTICACIÓN POR CONTRASEÑA
 # ------------------------------------------------------------
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
@@ -225,14 +217,14 @@ if not st.session_state.autenticado:
     st.stop()
 
 # ------------------------------------------------------------
-# GESTIÓN DE FECHAS (igual)
+# GESTIÓN DE FECHAS
 # ------------------------------------------------------------
 if 'fecha_referencia' not in st.session_state:
     hoy = datetime.now()
     st.session_state.fecha_referencia = (hoy - timedelta(days=hoy.weekday())).date()
 
 # ------------------------------------------------------------
-# SIDEBAR (adaptado a Supabase)
+# SIDEBAR
 # ------------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Panel de Configuración")
@@ -309,7 +301,7 @@ with st.sidebar:
             st.info("No hay registros de compradores aún.")
 
 # ------------------------------------------------------------
-# ÁREA PRINCIPAL (sin cambios en lógica, solo en datos)
+# ÁREA PRINCIPAL
 # ------------------------------------------------------------
 st.title("📅 Monitor de Órdenes de Compra")
 
@@ -331,10 +323,38 @@ columnas_ordenadas = [dia for dia in dias_semana if dia in df_visual.columns]
 df_visual = df_visual[columnas_ordenadas]
 st.dataframe(df_visual, use_container_width=True, hide_index=True)
 
+# ------------------------------------------------------------
+# 🔧 SECCIÓN DE VERIFICACIÓN DE DATOS (DEBUG)
+# ------------------------------------------------------------
+with st.expander("🔧 Verificar datos en Supabase (solo para administrador)"):
+    st.subheader("Tabla `proveedores_maestro`")
+    df_prov = obtener_compradores_autorizados()
+    if not df_prov.empty:
+        st.dataframe(df_prov)
+    else:
+        st.info("No hay registros en proveedores_maestro.")
+
+    st.subheader("Últimas semanas en `calendario_historico`")
+    # Obtener hasta 5 semanas recientes
+    resp_semanas = supabase.table("calendario_historico") \
+        .select("fecha_semana, dia_semana, proveedores") \
+        .order("fecha_semana", desc=True) \
+        .limit(35) \  # 5 semanas * 7 días = 35, aseguramos todas
+        .execute()
+
+    if resp_semanas.data:
+        df_hist = pd.DataFrame(resp_semanas.data)
+        # Agrupar un poco para mostrar la semana actual destacada
+        st.dataframe(df_hist)
+        # Mostrar también cuál es la semana actual que estamos visualizando
+        st.caption(f"Semana activa en pantalla: {st.session_state.fecha_referencia.strftime('%Y-%m-%d')}")
+    else:
+        st.info("No hay datos en calendario_historico.")
+        
 st.divider()
 
 # ------------------------------------------------------------
-# SISTEMA CARRUSEL (idéntico, solo usa los datos ya cargados)
+# SISTEMA CARRUSEL (rotación automática cada 6 segundos)
 # ------------------------------------------------------------
 st.subheader("🤖 Monitoreo en Tiempo Real")
 
