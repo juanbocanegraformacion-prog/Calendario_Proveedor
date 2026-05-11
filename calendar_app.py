@@ -75,15 +75,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# CONFIGURACIÓN DE SUPABASE
+# CONFIGURACIÓN DE SUPABASE (USANDO LA SERVICE_ROLE KEY)
 # ------------------------------------------------------------
-# Secrets esperados en Streamlit Cloud:
+# Secrets necesarios en Streamlit Cloud:
 # supabase_url = "https://xxxxxxxxxxxx.supabase.co"
-# supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."  (anon key)
+# supabase_service_role_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 
 supabase: Client = create_client(
     st.secrets["supabase_url"],
-    st.secrets["supabase_key"]
+    st.secrets["supabase_service_role_key"]   # clave service_role, NO la anon
 )
 
 # ------------------------------------------------------------
@@ -92,17 +92,14 @@ supabase: Client = create_client(
 dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
 # ------------------------------------------------------------
-# FUNCIONES DE DATOS (SUPABASE)
+# FUNCIONES DE DATOS (Supabase, igual que antes)
 # ------------------------------------------------------------
 def cargar_semana(fecha_consulta):
-    """Carga la planificación de la semana indicada. Si no existe, busca la semana anterior más reciente."""
-    fecha_str = fecha_consulta.isoformat()  # 'YYYY-MM-DD'
-    
+    fecha_str = fecha_consulta.isoformat()
     resp = supabase.table("calendario_historico") \
         .select("dia_semana, proveedores") \
         .eq("fecha_semana", fecha_str) \
         .execute()
-    
     if resp.data:
         result = {d: [] for d in dias_semana}
         for row in resp.data:
@@ -111,15 +108,13 @@ def cargar_semana(fecha_consulta):
             if dia in result:
                 result[dia] = provs
         return result
-    
-    # Buscar la semana anterior más reciente
+
     resp_ant = supabase.table("calendario_historico") \
         .select("fecha_semana, dia_semana, proveedores") \
         .lt("fecha_semana", fecha_str) \
         .order("fecha_semana", desc=True) \
         .limit(7) \
         .execute()
-    
     if resp_ant.data:
         ultima_fecha = resp_ant.data[0]["fecha_semana"]
         result = {d: [] for d in dias_semana}
@@ -130,75 +125,53 @@ def cargar_semana(fecha_consulta):
                 if dia in result:
                     result[dia] = provs
         return result
-    
     return {d: [] for d in dias_semana}
 
 def guardar_calendario(fecha, calendario_dict):
-    """Guarda la planificación de una semana completa en Supabase."""
     fecha_str = fecha.isoformat()
-    # Eliminar registros previos de esa semana
     supabase.table("calendario_historico").delete().eq("fecha_semana", fecha_str).execute()
-    
     rows = []
     for dia, lista_provs in calendario_dict.items():
         provs_limpios = [p.strip().upper() for p in lista_provs if p.strip()]
-        rows.append({
-            "fecha_semana": fecha_str,
-            "dia_semana": dia,
-            "proveedores": provs_limpios
-        })
-    
+        rows.append({"fecha_semana": fecha_str, "dia_semana": dia, "proveedores": provs_limpios})
     if rows:
         supabase.table("calendario_historico").insert(rows).execute()
 
 def registrar_comprador(proveedor, comprador):
-    """Inserta un nuevo par proveedor-comprador. Retorna True si se creó, False si ya existe."""
     p_up = proveedor.strip().upper()
     c_up = comprador.strip().upper()
-    
     resp = supabase.table("proveedores_maestro") \
         .select("id") \
         .eq("nombre", p_up) \
         .eq("comprador_habitual", c_up) \
         .execute()
-    
     if resp.data:
         return False
-    
-    supabase.table("proveedores_maestro") \
-        .insert({"nombre": p_up, "comprador_habitual": c_up}) \
-        .execute()
+    supabase.table("proveedores_maestro").insert({"nombre": p_up, "comprador_habitual": c_up}).execute()
     return True
 
 def eliminar_comprador(id_registro):
-    """Elimina un registro de proveedor_maestro por su id."""
     supabase.table("proveedores_maestro").delete().eq("id", id_registro).execute()
 
 def obtener_compradores_autorizados():
-    """Devuelve un DataFrame con id, nombre, comprador_habitual."""
     resp = supabase.table("proveedores_maestro") \
         .select("id, nombre, comprador_habitual") \
         .order("nombre") \
         .execute()
-    
     if resp.data:
         return pd.DataFrame(resp.data)
-    else:
-        return pd.DataFrame(columns=["id", "nombre", "comprador_habitual"])
+    return pd.DataFrame(columns=["id", "nombre", "comprador_habitual"])
 
 def obtener_proveedores_registrados():
-    """Lista de nombres únicos de proveedores."""
     resp = supabase.table("proveedores_maestro") \
         .select("nombre") \
         .execute()
-    
     if resp.data:
-        nombres = sorted(list(set(row["nombre"] for row in resp.data)))
-        return nombres
+        return sorted(list(set(row["nombre"] for row in resp.data)))
     return []
 
 # ------------------------------------------------------------
-# AUTENTICACIÓN POR CONTRASEÑA
+# AUTENTICACIÓN POR CONTRASEÑA (SIN CAMBIOS)
 # ------------------------------------------------------------
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
@@ -209,7 +182,7 @@ if not st.session_state.autenticado:
         password = st.text_input("Contraseña", type="password")
         submitted = st.form_submit_button("Acceder")
         if submitted:
-            if password == "RioMarket2026":  # Cambia la contraseña aquí
+            if password == "RioMarket2026":
                 st.session_state.autenticado = True
                 st.rerun()
             else:
@@ -275,10 +248,7 @@ with st.sidebar:
             if st.button("🔄 Aplicar cambios"):
                 for _, row in edited_m.iterrows():
                     supabase.table("proveedores_maestro") \
-                        .update({
-                            "nombre": row['nombre'].upper(),
-                            "comprador_habitual": row['comprador_habitual'].upper()
-                        }) \
+                        .update({"nombre": row['nombre'].upper(), "comprador_habitual": row['comprador_habitual'].upper()}) \
                         .eq("id", row['id']) \
                         .execute()
                 st.success("Registros actualizados.")
@@ -323,9 +293,7 @@ columnas_ordenadas = [dia for dia in dias_semana if dia in df_visual.columns]
 df_visual = df_visual[columnas_ordenadas]
 st.dataframe(df_visual, use_container_width=True, hide_index=True)
 
-# ------------------------------------------------------------
-# 🔧 SECCIÓN DE VERIFICACIÓN DE DATOS (DEBUG)
-# ------------------------------------------------------------
+# 🔧 VERIFICACIÓN DE DATOS (usando service_role, sin RLS)
 with st.expander("🔧 Verificar datos en Supabase (solo para administrador)"):
     st.subheader("Tabla `proveedores_maestro`")
     df_prov = obtener_compradores_autorizados()
@@ -335,26 +303,22 @@ with st.expander("🔧 Verificar datos en Supabase (solo para administrador)"):
         st.info("No hay registros en proveedores_maestro.")
 
     st.subheader("Últimas semanas en `calendario_historico`")
-    # Obtener hasta 5 semanas recientes
     resp_semanas = supabase.table("calendario_historico") \
         .select("fecha_semana, dia_semana, proveedores") \
         .order("fecha_semana", desc=True) \
-        .limit(35) \  # 5 semanas * 7 días = 35, aseguramos todas
+        .limit(35) \
         .execute()
-
     if resp_semanas.data:
         df_hist = pd.DataFrame(resp_semanas.data)
-        # Agrupar un poco para mostrar la semana actual destacada
         st.dataframe(df_hist)
-        # Mostrar también cuál es la semana actual que estamos visualizando
         st.caption(f"Semana activa en pantalla: {st.session_state.fecha_referencia.strftime('%Y-%m-%d')}")
     else:
         st.info("No hay datos en calendario_historico.")
-        
+
 st.divider()
 
 # ------------------------------------------------------------
-# SISTEMA CARRUSEL (rotación automática cada 6 segundos)
+# SISTEMA CARRUSEL
 # ------------------------------------------------------------
 st.subheader("🤖 Monitoreo en Tiempo Real")
 
