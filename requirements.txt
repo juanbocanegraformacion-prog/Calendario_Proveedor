@@ -1,4 +1,6 @@
+streamlit
 pandas
-requests
 openpyxl
+requests
+supabase
 st_autorefresh
