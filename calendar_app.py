@@ -96,36 +96,49 @@ dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", 
 # ------------------------------------------------------------
 def cargar_semana(fecha_consulta):
     fecha_str = fecha_consulta.isoformat()
-    resp = supabase.table("calendario_historico") \
-        .select("dia_semana, proveedores") \
-        .eq("fecha_semana", fecha_str) \
-        .execute()
-    if resp.data:
-        result = {d: [] for d in dias_semana}
-        for row in resp.data:
-            dia = row["dia_semana"]
-            provs = row["proveedores"] if row["proveedores"] else []
-            if dia in result:
-                result[dia] = provs
-        return result
-
-    resp_ant = supabase.table("calendario_historico") \
-        .select("fecha_semana, dia_semana, proveedores") \
-        .lt("fecha_semana", fecha_str) \
-        .order("fecha_semana", desc=True) \
-        .limit(7) \
-        .execute()
-    if resp_ant.data:
-        ultima_fecha = resp_ant.data[0]["fecha_semana"]
-        result = {d: [] for d in dias_semana}
-        for row in resp_ant.data:
-            if row["fecha_semana"] == ultima_fecha:
+    try:
+        # Consulta principal
+        resp = supabase.table("calendario_historico") \
+            .select("dia_semana,proveedores") \
+            .eq("fecha_semana", fecha_str) \
+            .execute()
+            
+        if resp.data:
+            result = {d: [] for d in dias_semana}
+            for row in resp.data:
                 dia = row["dia_semana"]
                 provs = row["proveedores"] if row["proveedores"] else []
                 if dia in result:
                     result[dia] = provs
-        return result
-    return {d: [] for d in dias_semana}
+            return result
+
+        # Consulta secundaria si la primera no tiene datos
+        resp_ant = supabase.table("calendario_historico") \
+            .select("fecha_semana,dia_semana,proveedores") \
+            .lt("fecha_semana", fecha_str) \
+            .order("fecha_semana", desc=True) \
+            .limit(7) \
+            .execute()
+            
+        if resp_ant.data:
+            ultima_fecha = resp_ant.data[0]["fecha_semana"]
+            result = {d: [] for d in dias_semana}
+            for row in resp_ant.data:
+                if row["fecha_semana"] == ultima_fecha:
+                    dia = row["dia_semana"]
+                    provs = row["proveedores"] if row["proveedores"] else []
+                    if dia in result:
+                        result[dia] = provs
+            return result
+            
+        # Si no hay datos en absoluto
+        return {d: [] for d in dias_semana}
+
+    except Exception as e:
+        # En lugar de romper la app, mostramos un error en la interfaz
+        st.error("⚠️ Error de conexión con Supabase. Verifica que las tablas y columnas existan correctamente.")
+        st.write(f"Detalle técnico (si está disponible): {e}")
+        return {d: [] for d in dias_semana}
 
 def guardar_calendario(fecha, calendario_dict):
     fecha_str = fecha.isoformat()
