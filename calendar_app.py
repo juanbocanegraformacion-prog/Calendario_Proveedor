@@ -327,17 +327,23 @@ with st.expander("🔧 Verificar datos en Supabase (solo para administrador)"):
         st.info("No hay registros en proveedores_maestro.")
 
     st.subheader("Últimas semanas en `calendario_historico`")
-    resp_semanas = supabase.table("calendario_historico") \
-        .select("fecha_semana, dia_semana, proveedores") \
-        .order("fecha_semana", desc=True) \
-        .limit(35) \
-        .execute()
-    if resp_semanas.data:
-        df_hist = pd.DataFrame(resp_semanas.data)
-        st.dataframe(df_hist)
-        st.caption(f"Semana activa en pantalla: {st.session_state.fecha_referencia.strftime('%Y-%m-%d')}")
-    else:
-        st.info("No hay datos en calendario_historico.")
+    try:
+        resp_semanas = supabase.table("calendario_historico") \
+            .select("fecha_semana,dia_semana,proveedores") \
+            .order("fecha_semana", desc=True) \
+            .limit(35) \
+            .execute()
+            
+        if resp_semanas.data:
+            df_hist = pd.DataFrame(resp_semanas.data)
+            st.dataframe(df_hist)
+            st.caption(f"Semana activa en pantalla: {st.session_state.fecha_referencia.strftime('%Y-%m-%d')}")
+        else:
+            st.info("No hay datos en calendario_historico.")
+            
+    except Exception as e:
+        st.error("⚠️ Error al cargar el historial de semanas para el administrador.")
+        st.caption(f"Detalle del error oculto: {e}")
 
 st.divider()
 
