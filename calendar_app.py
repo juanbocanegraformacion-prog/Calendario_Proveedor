@@ -167,22 +167,33 @@ def eliminar_comprador(id_registro):
     supabase.table("proveedores_maestro").delete().eq("id", id_registro).execute()
 
 def obtener_compradores_autorizados():
-    resp = supabase.table("proveedores_maestro") \
-        .select("id, nombre, comprador_habitual") \
-        .order("nombre") \
-        .execute()
-    if resp.data:
-        return pd.DataFrame(resp.data)
-    return pd.DataFrame(columns=["id", "nombre", "comprador_habitual"])
+    try:
+        # Eliminamos espacios en el select para evitar fallos de parsing en algunas versiones de postgrest
+        resp = supabase.table("proveedores_maestro") \
+            .select("id,nombre,comprador_habitual") \
+            .order("nombre") \
+            .execute()
+        if resp.data:
+            return pd.DataFrame(resp.data)
+        return pd.DataFrame(columns=["id", "nombre", "comprador_habitual"])
+    except Exception as e:
+        st.error("⚠️ Error al obtener la lista de compradores autorizados.")
+        st.caption(f"Detalle del error oculto: {e}")
+        return pd.DataFrame(columns=["id", "nombre", "comprador_habitual"])
 
 def obtener_proveedores_registrados():
-    resp = supabase.table("proveedores_maestro") \
-        .select("nombre") \
-        .execute()
-    if resp.data:
-        return sorted(list(set(row["nombre"] for row in resp.data)))
-    return []
-
+    try:
+        resp = supabase.table("proveedores_maestro") \
+            .select("nombre") \
+            .execute()
+        if resp.data:
+            return sorted(list(set(row["nombre"] for row in resp.data)))
+        return []
+    except Exception as e:
+        st.error("⚠️ Error crítico al leer la tabla `proveedores_maestro` en Supabase.")
+        st.info("Verifica que la tabla exista y que la columna se llame exactamente `nombre`.")
+        st.caption(f"Detalle del error oculto: {e}")
+        return []
 # ------------------------------------------------------------
 # AUTENTICACIÓN POR CONTRASEÑA (SIN CAMBIOS)
 # ------------------------------------------------------------
